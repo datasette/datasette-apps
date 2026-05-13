@@ -27,6 +27,97 @@
   margin: 0 0 1rem;
 }
 
+.datasette-app-form {
+  margin: 0 0 2rem;
+  max-width: 980px;
+}
+
+.datasette-app-form h2 {
+  border-top: 1px solid #ddd;
+  font-size: 1.35rem;
+  margin: 2rem 0 0.8rem;
+  padding-top: 1.25rem;
+}
+
+.datasette-app-form-row {
+  margin: 0 0 1rem;
+}
+
+.datasette-app-form-row label {
+  display: block;
+  font-weight: 700;
+  margin: 0 0 0.35rem;
+}
+
+.datasette-app-form input[type="text"],
+.datasette-app-form select,
+.datasette-app-form textarea,
+.datasette-app-llm-prompt textarea {
+  box-sizing: border-box;
+  font: inherit;
+  max-width: 100%;
+  width: 100%;
+}
+
+.datasette-app-form input[type="text"],
+.datasette-app-form select,
+.datasette-app-form textarea {
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  padding: 0.55rem 0.65rem;
+}
+
+.datasette-app-form textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
+.datasette-app-form select {
+  background: #fff;
+}
+
+.datasette-app-form-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.datasette-app-form-actions button,
+.datasette-app-form button[type="submit"] {
+  background: #276890;
+  border: 1px solid #1f5678;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.55rem 0.85rem;
+}
+
+.datasette-app-form-actions button:hover,
+.datasette-app-form-actions button:focus,
+.datasette-app-form button[type="submit"]:hover,
+.datasette-app-form button[type="submit"]:focus {
+  background: #1f5678;
+}
+
+.datasette-app-llm-prompt {
+  max-width: 980px;
+}
+
+.datasette-app-llm-prompt textarea {
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  padding: 0.65rem;
+}
+
+.datasette-app-form .cm-editor {
+  max-width: 100%;
+  width: 100%;
+}
+
 .datasette-app-list {
   list-style: none;
   margin: 1rem 0;

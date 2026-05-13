@@ -21,6 +21,8 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     )
 
     assert response.status_code == 200
+    assert 'class="datasette-app-form"' in response.text
+    assert 'textarea id="app-description" name="description"' in response.text
     assert "App access" in response.text
     assert "Data access" in response.text
     assert "Network access" in response.text

@@ -57,6 +57,8 @@ async def test_create_view_and_edit_stored_app():
         f"/-/apps/{app_id}/edit", actor={"id": "alice"}
     )
     assert edit_form.status_code == 200
+    assert 'class="datasette-app-form"' in edit_form.text
+    assert 'textarea id="app-description" name="description"' in edit_form.text
     assert "cm-editor-6.0.1.bundle.js" in edit_form.text
     assert 'textarea id="html-editor"' in edit_form.text
     assert "cm.editorFromTextArea" in edit_form.text

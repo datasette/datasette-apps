@@ -9,16 +9,29 @@
 {% block content %}
 <h1>Create app</h1>
 
-<form method="post">
-  <p><label>Name <input type="text" name="name"></label></p>
-  <p><label>Description <input type="text" name="description"></label></p>
-  <p><label>HTML <textarea id="html-editor" name="html"></textarea></label></p>
-  <p><button type="submit">Create app</button></p>
+<form class="datasette-app-form" method="post">
+  <div class="datasette-app-form-row">
+    <label for="app-name">Name</label>
+    <input id="app-name" type="text" name="name">
+  </div>
+  <div class="datasette-app-form-row">
+    <label for="app-description">Description</label>
+    <textarea id="app-description" name="description" rows="3"></textarea>
+  </div>
+  <div class="datasette-app-form-row">
+    <label for="html-editor">HTML</label>
+    <textarea id="html-editor" name="html"></textarea>
+  </div>
+  <div class="datasette-app-form-actions">
+    <button type="submit">Create app</button>
+  </div>
 </form>
 
-<section>
+<section class="datasette-app-llm-prompt">
   <h2>LLM prompt</h2>
-  <p><button type="button" id="copy-llm-prompt">Copy prompt</button></p>
+  <div class="datasette-app-form-actions">
+    <button type="button" id="copy-llm-prompt">Copy prompt</button>
+  </div>
   <textarea id="llm-prompt" rows="24" cols="100" readonly>{{ llm_prompt }}</textarea>
 </section>
 
