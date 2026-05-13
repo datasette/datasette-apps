@@ -4,6 +4,7 @@
   display: flex;
   gap: 1rem;
   justify-content: space-between;
+  margin-top: 1rem;
 }
 
 .datasette-apps-page-header h1,
