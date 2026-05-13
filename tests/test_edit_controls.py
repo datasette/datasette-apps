@@ -7,6 +7,71 @@ from datasette_apps import Registry
 
 
 @pytest.mark.asyncio
+async def test_create_form_shows_access_data_and_network_controls():
+    datasette = Datasette(memory=True)
+
+    response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
+
+    assert response.status_code == 200
+    assert "datasette-app-form" in response.text
+    assert 'class="datasette-app-edit-layout"' in response.text
+    assert 'class="datasette-app-edit-sidebar"' in response.text
+    assert 'textarea id="app-description" name="description"' in response.text
+    assert "App access" in response.text
+    assert "Private (only me)" in response.text
+    assert "Signed-in users" in response.text
+    assert "Specific users" not in response.text
+    assert "Specific actor IDs" not in response.text
+    assert 'name="actor_ids"' not in response.text
+    assert "Read-only data access" in response.text
+    assert "Read-only SQL query databases" in response.text
+    assert 'name="sql_databases"' in response.text
+    assert 'value="_memory"' in response.text
+    assert "Network access" in response.text
+    assert "Enter exact https:// origins" in response.text
+    assert "external scripts" in response.text
+    assert 'name="csp_origins"' in response.text
+    assert response.text.index(
+        'class="datasette-app-edit-sidebar"'
+    ) < response.text.index("App access")
+    assert response.text.index("App access") < response.text.index(
+        "Read-only data access"
+    )
+    assert response.text.index("Read-only data access") < response.text.index(
+        ">Create app</button>"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_form_saves_access_data_and_network_controls():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+
+    response = await datasette.client.post(
+        "/-/apps/create",
+        actor={"id": "alice"},
+        data={
+            "name": "Shared app",
+            "description": "",
+            "html": "<h1>Shared</h1>",
+            "access_mode": "signed-in",
+            "sql_databases_present": "1",
+            "sql_databases": "_memory",
+            "csp_origins": "https://api.github.com\n",
+        },
+    )
+
+    assert response.status_code == 302
+    app_id = response.headers["location"].rsplit("/", 1)[-1]
+    assert await registry.get_access_mode(app_id) == "signed-in"
+    assert await registry.get_sql_databases(app_id) == ["_memory"]
+    assert await registry.get_csp_origins(app_id) == ["https://api.github.com"]
+
+    bob = await datasette.client.get(response.headers["location"], actor={"id": "bob"})
+    assert bob.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_edit_form_shows_access_data_network_and_capability_controls():
     datasette = Datasette(memory=True)
     app = await Registry(datasette).create_stored_app(
@@ -37,6 +102,7 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'value="_memory"' in response.text
     assert "Network access" in response.text
     assert "Enter exact https:// origins" in response.text
+    assert "external scripts" in response.text
     assert "Capabilities" not in response.text
     assert "Capability grants JSON" not in response.text
     assert 'name="capability_grants"' not in response.text

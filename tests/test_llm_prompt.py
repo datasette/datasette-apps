@@ -28,7 +28,7 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
 
     assert response.status_code == 200
-    assert 'class="datasette-app-form"' in response.text
+    assert 'class="datasette-app-form datasette-app-edit-form"' in response.text
     assert 'textarea id="app-description" name="description"' in response.text
     assert "Read-only SQL query databases" in response.text
     assert 'name="sql_databases"' in response.text

@@ -78,6 +78,31 @@ async def _visible_database_names(datasette, actor):
     return names
 
 
+def _actor_ids_from_post(post):
+    return [
+        actor_id.strip()
+        for actor_id in (post.get("actor_ids") or "").replace(",", "\n").splitlines()
+        if actor_id.strip()
+    ]
+
+
+def _csp_origins_from_post(post):
+    return [
+        origin.strip()
+        for origin in (post.get("csp_origins") or "").splitlines()
+        if origin.strip()
+    ]
+
+
+async def _selected_sql_databases(datasette, actor, post):
+    visible_database_names = set(await _visible_database_names(datasette, actor))
+    return [
+        database_name
+        for database_name in post.getlist("sql_databases")
+        if database_name in visible_database_names
+    ]
+
+
 async def _redirect_after_pin(request):
     if request.method == "POST":
         post = await request.post_vars()
@@ -156,20 +181,25 @@ async def create_app(datasette, request):
         )
 
     post = await request.form()
-    app = await Registry(datasette).create_stored_app(
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
         actor_id=_actor_id(actor),
         name=post.get("name") or "Untitled app",
         description=post.get("description") or "",
         html=post.get("html") or "",
     )
+    if "access_mode" in post:
+        await registry.set_access_mode(
+            app["id"],
+            post.get("access_mode") or "private",
+            actor_ids=_actor_ids_from_post(post),
+        )
     if "sql_databases_present" in post:
-        visible_database_names = set(await _visible_database_names(datasette, actor))
-        sql_databases = [
-            database_name
-            for database_name in post.getlist("sql_databases")
-            if database_name in visible_database_names
-        ]
-        await Registry(datasette).set_sql_databases(app["id"], sql_databases)
+        await registry.set_sql_databases(
+            app["id"], await _selected_sql_databases(datasette, actor, post)
+        )
+    if "csp_origins" in post:
+        await registry.set_csp_origins(app["id"], _csp_origins_from_post(post))
     return Response.redirect(app["path"])
 
 
@@ -247,33 +277,17 @@ async def edit_app(datasette, request):
         post.get("html") or "",
     )
     if "access_mode" in post:
-        actor_ids = [
-            actor_id.strip()
-            for actor_id in (post.get("actor_ids") or "")
-            .replace(",", "\n")
-            .splitlines()
-            if actor_id.strip()
-        ]
         await registry.set_access_mode(
-            app_id, post.get("access_mode") or "private", actor_ids=actor_ids
+            app_id,
+            post.get("access_mode") or "private",
+            actor_ids=_actor_ids_from_post(post),
         )
     if "sql_databases_present" in post:
-        visible_database_names = set(await _visible_database_names(datasette, actor))
-        sql_databases = [
-            database_name
-            for database_name in post.getlist("sql_databases")
-            if database_name in visible_database_names
-        ]
-        await registry.set_sql_databases(app_id, sql_databases)
-    if "csp_origins" in post:
-        await registry.set_csp_origins(
-            app_id,
-            [
-                origin.strip()
-                for origin in (post.get("csp_origins") or "").splitlines()
-                if origin.strip()
-            ],
+        await registry.set_sql_databases(
+            app_id, await _selected_sql_databases(datasette, actor, post)
         )
+    if "csp_origins" in post:
+        await registry.set_csp_origins(app_id, _csp_origins_from_post(post))
     if "capability_grants" in post:
         await registry.set_capability_grants(
             app_id, json.loads(post.get("capability_grants") or "{}")

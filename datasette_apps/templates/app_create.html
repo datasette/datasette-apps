@@ -9,41 +9,67 @@
 {% block content %}
 <h1>Create app</h1>
 
-<form class="datasette-app-form" method="post">
-  <div class="datasette-app-form-row">
-    <label for="app-name">Name</label>
-    <input id="app-name" type="text" name="name">
-  </div>
-  <div class="datasette-app-form-row">
-    <label for="app-description">Description</label>
-    <textarea id="app-description" name="description" rows="3"></textarea>
-  </div>
-  <div class="datasette-app-form-row">
-    <label for="html-editor">HTML</label>
-    <textarea id="html-editor" name="html"></textarea>
-  </div>
-  <h2>Read-only data access</h2>
-  <div class="datasette-app-form-row">
-    <fieldset class="datasette-app-checkbox-group">
-      <legend>Read-only SQL query databases</legend>
-      <input type="hidden" name="sql_databases_present" value="1">
-      {% for database in sql_database_options %}
-        <label>
-          <input
-            type="checkbox"
-            name="sql_databases"
-            value="{{ database.name }}"
-            {% if database.selected %}checked{% endif %}
-          >
-          {{ database.name }}
-        </label>
-      {% else %}
-        <p>No databases are visible to you.</p>
-      {% endfor %}
-    </fieldset>
-  </div>
-  <div class="datasette-app-form-actions">
-    <button type="submit">Create app</button>
+<form class="datasette-app-form datasette-app-edit-form" method="post">
+  <div class="datasette-app-edit-layout">
+    <div class="datasette-app-edit-main">
+      <div class="datasette-app-form-row">
+        <label for="app-name">Name</label>
+        <input id="app-name" type="text" name="name">
+      </div>
+      <div class="datasette-app-form-row">
+        <label for="app-description">Description</label>
+        <textarea id="app-description" name="description" rows="3"></textarea>
+      </div>
+      <div class="datasette-app-form-row">
+        <label for="html-editor">HTML</label>
+        <textarea id="html-editor" name="html"></textarea>
+      </div>
+    </div>
+
+    <aside class="datasette-app-edit-sidebar">
+      <h2>App access</h2>
+      <div class="datasette-app-form-row">
+        <label for="app-access-mode">Who can open this app</label>
+        <select id="app-access-mode" name="access_mode">
+          <option value="private" selected>Private (only me)</option>
+          <option value="signed-in">Signed-in users</option>
+        </select>
+      </div>
+
+      <h2>Read-only data access</h2>
+      <div class="datasette-app-form-row">
+        <fieldset class="datasette-app-checkbox-group">
+          <legend>Read-only SQL query databases</legend>
+          <input type="hidden" name="sql_databases_present" value="1">
+          {% for database in sql_database_options %}
+            <label>
+              <input
+                type="checkbox"
+                name="sql_databases"
+                value="{{ database.name }}"
+                {% if database.selected %}checked{% endif %}
+              >
+              {{ database.name }}
+            </label>
+          {% else %}
+            <p>No databases are visible to you.</p>
+          {% endfor %}
+        </fieldset>
+      </div>
+
+      <h2>Network access</h2>
+      <div class="datasette-app-form-row">
+        <label for="app-csp-origins">Allowed network and asset origins</label>
+        <p class="datasette-app-form-help">
+          Enter exact https:// origins, one per line, such as https://api.github.com. These origins can be used for fetch(), remote images, external scripts, and external styles. Do not include paths, query strings, wildcards, or localhost.
+        </p>
+        <textarea id="app-csp-origins" name="csp_origins" rows="4"></textarea>
+      </div>
+
+      <div class="datasette-app-form-actions">
+        <button type="submit">Create app</button>
+      </div>
+    </aside>
   </div>
 </form>
 
