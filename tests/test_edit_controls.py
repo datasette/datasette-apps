@@ -36,6 +36,7 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'name="sql_databases"' in response.text
     assert 'value="_memory"' in response.text
     assert "Network access" in response.text
+    assert "Enter exact https:// origins" in response.text
     assert "Capabilities" in response.text
     assert response.text.index('class="datasette-app-edit-sidebar"') < response.text.index(
         "App access"
