@@ -45,6 +45,8 @@ The create and edit pages use Datasette's existing bundled CodeMirror editor for
 
 Other plugins can expose server-backed capabilities to stored HTML apps by implementing `register_app_capabilities(datasette)` and returning `AppCapability` objects. Non-built-in capability grants are stored with raw JSON configuration in phase one.
 
+The edit page includes explicit controls for app access, read-only table/view grants, allowed network origins, and raw JSON capability grants.
+
 Plugins can add their own apps to the central catalog during startup:
 
 ```python

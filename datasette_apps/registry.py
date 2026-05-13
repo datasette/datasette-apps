@@ -460,6 +460,22 @@ class Registry:
         grant["config"] = _decode_json(grant["config"], {})
         return grant
 
+    async def get_capability_grants(self, app_id):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT *
+            FROM app_capability_grants
+            WHERE app_id = :app_id
+            ORDER BY capability
+            """,
+            {"app_id": app_id},
+        )
+        grants = {}
+        for row in result.rows:
+            grants[row["capability"]] = _decode_json(row["config"], {})
+        return grants
+
     async def set_capability_grant(self, app_id, capability, config=None):
         validate_capability_name(capability)
         await self.ensure_tables()
@@ -481,3 +497,71 @@ class Registry:
                 "now": now,
             },
         )
+
+    async def set_capability_grants(self, app_id, grants):
+        for capability in grants:
+            validate_capability_name(capability)
+        await self.ensure_tables()
+        now = _now()
+
+        def save(conn):
+            conn.execute(
+                "DELETE FROM app_capability_grants WHERE app_id = ?", (app_id,)
+            )
+            conn.executemany(
+                """
+                INSERT INTO app_capability_grants (
+                    app_id, capability, config, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (app_id, capability, json.dumps(config or {}, sort_keys=True), now, now)
+                    for capability, config in grants.items()
+                ],
+            )
+
+        await self.db.execute_write_fn(save)
+
+    async def get_access_mode(self, app_id):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT 1
+            FROM app_access
+            WHERE app_id = :app_id
+              AND action = 'view-app'
+              AND subject_type = 'authenticated'
+              AND allow = 1
+            """,
+            {"app_id": app_id},
+        )
+        return "signed-in" if result.first() else "private"
+
+    async def set_access_mode(self, app_id, mode):
+        if mode not in {"private", "signed-in"}:
+            raise ValueError("Unknown app access mode")
+        await self.ensure_tables()
+        now = _now()
+
+        def save(conn):
+            conn.execute(
+                """
+                DELETE FROM app_access
+                WHERE app_id = ? AND action = 'view-app'
+                """,
+                (app_id,),
+            )
+            if mode == "signed-in":
+                conn.execute(
+                    """
+                    INSERT INTO app_access (
+                        app_id, action, subject_type, subject_id,
+                        allow, created_at, updated_at
+                    )
+                    VALUES (?, 'view-app', 'authenticated', NULL, 1, ?, ?)
+                    """,
+                    (app_id, now, now),
+                )
+
+        await self.db.execute_write_fn(save)

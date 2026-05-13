@@ -177,11 +177,42 @@ async def edit_app(datasette, request):
     await _ensure_app_permission(datasette, actor, "edit-app", app_id)
     if request.method == "GET":
         version = await registry.get_current_version(app_id)
+        access_mode = await registry.get_access_mode(app_id)
+        data_permissions = json.dumps(
+            await registry.get_data_permissions(app_id), indent=2
+        )
+        csp_origins = "\n".join(await registry.get_csp_origins(app_id))
+        capability_grants = json.dumps(
+            await registry.get_capability_grants(app_id), indent=2
+        )
+        private_selected = " selected" if access_mode == "private" else ""
+        signed_in_selected = " selected" if access_mode == "signed-in" else ""
         body = f"""
         <form method="post">
           <p><label>Name <input type="text" name="name" value="{html.escape(app['name'], quote=True)}"></label></p>
           <p><label>Description <input type="text" name="description" value="{html.escape(app['description'], quote=True)}"></label></p>
           <p><label>HTML <textarea id="html-editor" name="html">{html.escape(version['html'])}</textarea></label></p>
+          <h2>App access</h2>
+          <p>
+            <label>Who can open this app
+              <select name="access_mode">
+                <option value="private"{private_selected}>Private</option>
+                <option value="signed-in"{signed_in_selected}>Signed-in users</option>
+              </select>
+            </label>
+          </p>
+          <h2>Data access</h2>
+          <p><label>Read-only table/view grants JSON
+            <textarea name="data_permissions" rows="8" cols="100">{html.escape(data_permissions)}</textarea>
+          </label></p>
+          <h2>Network access</h2>
+          <p><label>Allowed fetch() origins
+            <textarea name="csp_origins" rows="4" cols="100">{html.escape(csp_origins)}</textarea>
+          </label></p>
+          <h2>Capabilities</h2>
+          <p><label>Capability grants JSON
+            <textarea name="capability_grants" rows="8" cols="100">{html.escape(capability_grants)}</textarea>
+          </label></p>
           <p><button type="submit">Save app</button></p>
         </form>
         {_codemirror_assets()}
@@ -195,6 +226,25 @@ async def edit_app(datasette, request):
         post.get("description") or "",
         post.get("html") or "",
     )
+    if "access_mode" in post:
+        await registry.set_access_mode(app_id, post.get("access_mode") or "private")
+    if "data_permissions" in post:
+        await registry.set_data_permissions(
+            app_id, json.loads(post.get("data_permissions") or "[]")
+        )
+    if "csp_origins" in post:
+        await registry.set_csp_origins(
+            app_id,
+            [
+                origin.strip()
+                for origin in (post.get("csp_origins") or "").splitlines()
+                if origin.strip()
+            ],
+        )
+    if "capability_grants" in post:
+        await registry.set_capability_grants(
+            app_id, json.loads(post.get("capability_grants") or "{}")
+        )
     return Response.redirect(f"/-/apps/{app_id}")
 
 
