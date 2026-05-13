@@ -24,6 +24,7 @@ async def test_apps_index_requires_actor_and_lists_apps():
     assert response.status_code == 200
     assert "Plugin One" in response.text
     assert "/-/apps/plugin:one/launch" in response.text
+    assert 'class="datasette-app-button" href="/-/apps/create"' in response.text
 
 
 @pytest.mark.asyncio
