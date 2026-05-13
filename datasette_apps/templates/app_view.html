@@ -12,7 +12,9 @@
   <h1>{{ app.name }}</h1>
   <div class="datasette-app-actions">
     <a class="datasette-app-button" href="/-/apps">All apps</a>
+    {% if can_edit %}
     <a class="datasette-app-button" href="/-/apps/{{ app.id }}/edit">Edit app</a>
+    {% endif %}
     <form class="datasette-app-pin-form" method="post" action="/-/apps/{{ app.id }}/{% if pinned %}unpin{% else %}pin{% endif %}">
       <input type="hidden" name="next" value="{{ current_path }}">
       <button

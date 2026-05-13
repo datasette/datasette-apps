@@ -217,6 +217,9 @@ async def view_app(datasette, request):
     state = await registry.get_user_state(actor_id, app_id)
     csp = build_csp(await registry.get_csp_origins(app_id))
     srcdoc = build_app_srcdoc(version["html"], csp, iframe_bridge_script())
+    can_edit = await datasette.allowed(
+        action="edit-app", resource=AppResource(app_id), actor=actor
+    )
     return Response.html(
         await datasette.render_template(
             "app_view.html",
@@ -227,6 +230,7 @@ async def view_app(datasette, request):
                 "parent_bridge": parent_bridge_script(app_id),
                 "pinned": bool(state and state["pinned_at"]),
                 "current_path": request.path,
+                "can_edit": can_edit,
             },
             request=request,
         )

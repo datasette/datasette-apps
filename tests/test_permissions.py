@@ -77,3 +77,25 @@ async def test_routes_enforce_app_permissions():
 
     allowed = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "alice"})
     assert allowed.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_shared_app_only_shows_edit_button_to_owner():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Shared app",
+        description="",
+        html="<h1>Shared</h1>",
+    )
+    await registry.set_access_mode(app["id"], "signed-in")
+
+    owner = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "alice"})
+    viewer = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "bob"})
+
+    assert owner.status_code == 200
+    assert viewer.status_code == 200
+    assert f'href="/-/apps/{app["id"]}/edit"' in owner.text
+    assert f'href="/-/apps/{app["id"]}/edit"' not in viewer.text
+    assert "Edit app" not in viewer.text
