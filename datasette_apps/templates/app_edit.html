@@ -31,14 +31,9 @@
       <div class="datasette-app-form-row">
         <label for="app-access-mode">Who can open this app</label>
         <select id="app-access-mode" name="access_mode">
-          <option value="private"{% if access_mode == "private" %} selected{% endif %}>Private</option>
+          <option value="private"{% if access_mode != "signed-in" %} selected{% endif %}>Private</option>
           <option value="signed-in"{% if access_mode == "signed-in" %} selected{% endif %}>Signed-in users</option>
-          <option value="specific"{% if access_mode == "specific" %} selected{% endif %}>Specific users</option>
         </select>
-      </div>
-      <div class="datasette-app-form-row">
-        <label for="app-actor-ids">Specific actor IDs</label>
-        <textarea id="app-actor-ids" name="actor_ids" rows="4">{{ actor_ids }}</textarea>
       </div>
 
       <h2>Data access</h2>

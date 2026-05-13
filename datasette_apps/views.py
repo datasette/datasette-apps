@@ -223,7 +223,6 @@ async def edit_app(datasette, request):
         capability_grants = json.dumps(
             await registry.get_capability_grants(app_id), indent=2
         )
-        actor_ids = "\n".join(await registry.get_access_actor_ids(app_id))
         return Response.html(
             await datasette.render_template(
                 "app_edit.html",
@@ -231,7 +230,6 @@ async def edit_app(datasette, request):
                     "app": app,
                     "html_source": version["html"],
                     "access_mode": access_mode,
-                    "actor_ids": actor_ids,
                     "sql_database_options": sql_database_options,
                     "csp_origins": csp_origins,
                     "capability_grants": capability_grants,
