@@ -1,0 +1,48 @@
+import pytest
+
+from datasette_apps.csp import build_csp, normalize_connect_origin
+from datasette_apps.rendering import build_app_srcdoc
+
+
+def test_build_csp_defaults_to_no_connect_src():
+    assert build_csp([]) == "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';"
+
+
+def test_build_csp_includes_exact_connect_origins():
+    assert build_csp(["https://api.github.com"]) == (
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+        "connect-src https://api.github.com;"
+    )
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://api.github.com",
+        "https://localhost:8000",
+        "https://127.0.0.1:8000",
+        "https://[::1]:8000",
+        "https://api.github.com/path",
+        "https://*.github.com",
+    ],
+)
+def test_normalize_connect_origin_rejects_unsafe_origins(origin):
+    with pytest.raises(ValueError):
+        normalize_connect_origin(origin)
+
+
+def test_build_app_srcdoc_preserves_doctype_and_inserts_csp_first_in_head():
+    srcdoc = build_app_srcdoc(
+        "<!DOCTYPE html><html><head><title>Hello</title></head><body></body></html>",
+        "default-src 'none';",
+    )
+
+    assert srcdoc.startswith("<!DOCTYPE html><html><head><meta http-equiv=\"Content-Security-Policy\"")
+    assert srcdoc.index("Content-Security-Policy") < srcdoc.index("<title>Hello</title>")
+
+
+def test_build_app_srcdoc_creates_head_if_missing():
+    srcdoc = build_app_srcdoc("<h1>Hello</h1>", "default-src 'none';")
+
+    assert srcdoc.startswith("<html><head><meta http-equiv=\"Content-Security-Policy\"")
+    assert srcdoc.index("Content-Security-Policy") < srcdoc.index("<h1>Hello</h1>")

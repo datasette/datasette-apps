@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from .db import ensure_tables
 from .ids import monotonic_ulid
+from .csp import normalize_connect_origin
 
 
 def _now():
@@ -307,3 +308,41 @@ class Registry:
             {"actor_id": actor_id, "app_id": app_id},
         )
         return _row_to_state(result.first())
+
+    async def get_csp_origins(self, app_id, directive="connect-src"):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT origin
+            FROM app_csp_origins
+            WHERE app_id = :app_id AND directive = :directive
+            ORDER BY origin
+            """,
+            {"app_id": app_id, "directive": directive},
+        )
+        return [row["origin"] for row in result.rows]
+
+    async def set_csp_origins(self, app_id, origins, directive="connect-src"):
+        await self.ensure_tables()
+        normalized = [normalize_connect_origin(origin) for origin in origins]
+        now = _now()
+
+        def save(conn):
+            conn.execute(
+                """
+                DELETE FROM app_csp_origins
+                WHERE app_id = ? AND directive = ?
+                """,
+                (app_id, directive),
+            )
+            conn.executemany(
+                """
+                INSERT INTO app_csp_origins (
+                    app_id, directive, origin, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [(app_id, directive, origin, now, now) for origin in normalized],
+            )
+
+        await self.db.execute_write_fn(save)

@@ -31,6 +31,8 @@ This plugin allows you to create and modify HTML apps, and provides a plugin hoo
 
 HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and store every edit as a new row in `app_versions`.
 
+Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` `connect-src` origins configured, and localhost origins are never allowed.
+
 Plugins can add their own apps to the central catalog during startup:
 
 ```python
