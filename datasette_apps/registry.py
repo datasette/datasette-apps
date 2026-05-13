@@ -536,13 +536,43 @@ class Registry:
             """,
             {"app_id": app_id},
         )
-        return "signed-in" if result.first() else "private"
+        if result.first():
+            return "signed-in"
+        actor_result = await self.db.execute(
+            """
+            SELECT 1
+            FROM app_access
+            WHERE app_id = :app_id
+              AND action = 'view-app'
+              AND subject_type = 'actor'
+              AND allow = 1
+            """,
+            {"app_id": app_id},
+        )
+        return "specific" if actor_result.first() else "private"
 
-    async def set_access_mode(self, app_id, mode):
-        if mode not in {"private", "signed-in"}:
+    async def get_access_actor_ids(self, app_id):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT subject_id
+            FROM app_access
+            WHERE app_id = :app_id
+              AND action = 'view-app'
+              AND subject_type = 'actor'
+              AND allow = 1
+            ORDER BY subject_id
+            """,
+            {"app_id": app_id},
+        )
+        return [row["subject_id"] for row in result.rows]
+
+    async def set_access_mode(self, app_id, mode, actor_ids=None):
+        if mode not in {"private", "signed-in", "specific"}:
             raise ValueError("Unknown app access mode")
         await self.ensure_tables()
         now = _now()
+        actor_ids = [actor_id for actor_id in actor_ids or [] if actor_id]
 
         def save(conn):
             conn.execute(
@@ -562,6 +592,17 @@ class Registry:
                     VALUES (?, 'view-app', 'authenticated', NULL, 1, ?, ?)
                     """,
                     (app_id, now, now),
+                )
+            if mode == "specific":
+                conn.executemany(
+                    """
+                    INSERT INTO app_access (
+                        app_id, action, subject_type, subject_id,
+                        allow, created_at, updated_at
+                    )
+                    VALUES (?, 'view-app', 'actor', ?, 1, ?, ?)
+                    """,
+                    [(app_id, actor_id, now, now) for actor_id in actor_ids],
                 )
 
         await self.db.execute_write_fn(save)

@@ -204,8 +204,10 @@ async def edit_app(datasette, request):
         capability_grants = json.dumps(
             await registry.get_capability_grants(app_id), indent=2
         )
+        actor_ids = "\n".join(await registry.get_access_actor_ids(app_id))
         private_selected = " selected" if access_mode == "private" else ""
         signed_in_selected = " selected" if access_mode == "signed-in" else ""
+        specific_selected = " selected" if access_mode == "specific" else ""
         body = f"""
         <form method="post">
           <p><label>Name <input type="text" name="name" value="{html.escape(app['name'], quote=True)}"></label></p>
@@ -217,9 +219,13 @@ async def edit_app(datasette, request):
               <select name="access_mode">
                 <option value="private"{private_selected}>Private</option>
                 <option value="signed-in"{signed_in_selected}>Signed-in users</option>
+                <option value="specific"{specific_selected}>Specific users</option>
               </select>
             </label>
           </p>
+          <p><label>Specific actor IDs
+            <textarea name="actor_ids" rows="4" cols="80">{html.escape(actor_ids)}</textarea>
+          </label></p>
           <h2>Data access</h2>
           <p><label>Read-only table/view grants JSON
             <textarea name="data_permissions" rows="8" cols="100">{html.escape(data_permissions)}</textarea>
@@ -246,7 +252,14 @@ async def edit_app(datasette, request):
         post.get("html") or "",
     )
     if "access_mode" in post:
-        await registry.set_access_mode(app_id, post.get("access_mode") or "private")
+        actor_ids = [
+            actor_id.strip()
+            for actor_id in (post.get("actor_ids") or "").replace(",", "\n").splitlines()
+            if actor_id.strip()
+        ]
+        await registry.set_access_mode(
+            app_id, post.get("access_mode") or "private", actor_ids=actor_ids
+        )
     if "data_permissions" in post:
         await registry.set_data_permissions(
             app_id, json.loads(post.get("data_permissions") or "[]")

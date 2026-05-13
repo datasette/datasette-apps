@@ -95,3 +95,36 @@ async def test_edit_form_signed_in_access_mode_allows_other_actor():
 
     response = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "bob"})
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_edit_form_specific_users_access_mode():
+    datasette = Datasette(memory=True)
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Team app",
+        description="",
+        html="<h1>Team</h1>",
+    )
+
+    await datasette.client.post(
+        f"/-/apps/{app['id']}/edit",
+        actor={"id": "alice"},
+        data={
+            "name": "Team app",
+            "description": "",
+            "html": "<h1>Team</h1>",
+            "access_mode": "specific",
+            "actor_ids": "bob\ncarol",
+            "data_permissions": "[]",
+            "csp_origins": "",
+            "capability_grants": "{}",
+        },
+    )
+
+    bob = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "bob"})
+    mallory = await datasette.client.get(
+        f"/-/apps/{app['id']}", actor={"id": "mallory"}
+    )
+    assert bob.status_code == 200
+    assert mallory.status_code == 403
