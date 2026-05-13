@@ -24,6 +24,60 @@
   justify-content: flex-end;
 }
 
+.datasette-app-error-panel {
+  background: #fffaf0;
+  border: 1px solid #d8c48f;
+  border-radius: 4px;
+  color: #3f320d;
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.datasette-app-error-panel[hidden] {
+  display: none;
+}
+
+.datasette-app-error-panel summary {
+  color: #7a5200;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.datasette-app-error-list {
+  margin: 0.75rem 0 0 1.25rem;
+  padding: 0;
+}
+
+.datasette-app-error-list li {
+  margin: 0 0 0.8rem;
+}
+
+.datasette-app-error-kind {
+  display: block;
+}
+
+.datasette-app-error-message {
+  margin: 0.2rem 0;
+}
+
+.datasette-app-error-time {
+  color: rgba(63, 50, 13, 0.72);
+  display: block;
+  font-size: 0.85rem;
+  margin: 0 0 0.3rem;
+}
+
+.datasette-app-error-details {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(216, 196, 143, 0.7);
+  border-radius: 3px;
+  font-size: 0.85rem;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.45rem;
+  white-space: pre-wrap;
+}
+
 .datasette-apps-search {
   margin: 0 0 1rem;
 }

@@ -1,7 +1,11 @@
 import pytest
 
 from datasette_apps.csp import build_csp, normalize_connect_origin
-from datasette_apps.rendering import build_app_srcdoc, iframe_bridge_script
+from datasette_apps.rendering import (
+    build_app_srcdoc,
+    iframe_bridge_script,
+    parent_bridge_script,
+)
 
 
 def test_build_csp_defaults_to_no_connect_src():
@@ -62,3 +66,22 @@ def test_build_app_srcdoc_injects_datasette_query_bridge_after_csp():
     assert "window.datasette" in srcdoc
     assert srcdoc.index("Content-Security-Policy") < srcdoc.index("window.datasette")
     assert srcdoc.index("window.datasette") < srcdoc.index("<title>Hello</title>")
+
+
+def test_iframe_bridge_reports_app_errors_to_parent():
+    script = iframe_bridge_script()
+
+    assert 'type: "datasette-app-error"' in script
+    assert "securitypolicyviolation" in script
+    assert "unhandledrejection" in script
+    assert "console.error" in script
+    assert "window.fetch" in script
+
+
+def test_parent_bridge_renders_app_error_panel():
+    script = parent_bridge_script("app1")
+
+    assert "datasette-app-error-panel" in script
+    assert "datasette-app-error-list" in script
+    assert 'message.type === "datasette-app-error"' in script
+    assert "errors.slice(-50)" in script
