@@ -32,11 +32,39 @@
   max-width: 980px;
 }
 
+.datasette-app-edit-form {
+  max-width: none;
+}
+
+.datasette-app-edit-layout {
+  align-items: start;
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+}
+
+.datasette-app-edit-main,
+.datasette-app-edit-sidebar {
+  min-width: 0;
+}
+
+.datasette-app-edit-sidebar {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
 .datasette-app-form h2 {
   border-top: 1px solid #ddd;
   font-size: 1.35rem;
   margin: 2rem 0 0.8rem;
   padding-top: 1.25rem;
+}
+
+.datasette-app-edit-sidebar h2:first-child {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .datasette-app-form-row {
@@ -227,8 +255,13 @@
 @media (max-width: 700px) {
   .datasette-apps-page-header,
   .datasette-app-view-header,
+  .datasette-app-edit-layout,
   .datasette-app-list-item {
     display: block;
+  }
+
+  .datasette-app-edit-sidebar {
+    margin-top: 1.25rem;
   }
 
   .datasette-app-actions,

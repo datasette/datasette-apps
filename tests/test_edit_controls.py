@@ -21,7 +21,9 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     )
 
     assert response.status_code == 200
-    assert 'class="datasette-app-form"' in response.text
+    assert "datasette-app-form" in response.text
+    assert 'class="datasette-app-edit-layout"' in response.text
+    assert 'class="datasette-app-edit-sidebar"' in response.text
     assert 'textarea id="app-description" name="description"' in response.text
     assert "App access" in response.text
     assert "Data access" in response.text
@@ -30,6 +32,8 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'value="_memory"' in response.text
     assert "Network access" in response.text
     assert "Capabilities" in response.text
+    assert response.text.index("Data access") < response.text.index("Save app")
+    assert response.text.index("Capabilities") < response.text.index("Save app")
 
 
 @pytest.mark.asyncio
