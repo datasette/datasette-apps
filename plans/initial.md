@@ -369,13 +369,13 @@ Phase-one scope:
 Default CSP:
 
 ```text
-default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';
+default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
 ```
 
 With two allowed API origins:
 
 ```text
-default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://api.github.com https://api.inaturalist.org;
+default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src https://api.github.com https://api.inaturalist.org;
 ```
 
 Important browser behavior:
@@ -569,7 +569,7 @@ Adapt the useful parts of `datasette-artifacts`, renamed around apps:
 Default CSP for stored HTML apps:
 
 ```text
-default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';
+default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
 ```
 
 The app iframe cannot fetch directly from the network or Datasette unless the app has explicit per-app CSP `connect-src` origins. Database access goes through the parent bridge, then through app-scoped server endpoints that apply both actor permission checks and app data permission checks.

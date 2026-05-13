@@ -5,12 +5,16 @@ from datasette_apps.rendering import build_app_srcdoc, iframe_bridge_script
 
 
 def test_build_csp_defaults_to_no_connect_src():
-    assert build_csp([]) == "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';"
+    assert build_csp([]) == (
+        "default-src 'none'; script-src 'unsafe-inline'; "
+        "style-src 'unsafe-inline'; img-src data: blob:;"
+    )
 
 
 def test_build_csp_includes_exact_connect_origins():
     assert build_csp(["https://api.github.com"]) == (
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+        "default-src 'none'; script-src 'unsafe-inline'; "
+        "style-src 'unsafe-inline'; img-src data: blob:; "
         "connect-src https://api.github.com;"
     )
 

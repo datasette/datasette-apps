@@ -4,7 +4,12 @@ import ipaddress
 from urllib.parse import urlsplit
 
 
-BASE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';"
+BASE_CSP = (
+    "default-src 'none'; "
+    "script-src 'unsafe-inline'; "
+    "style-src 'unsafe-inline'; "
+    "img-src data: blob:;"
+)
 
 
 def _is_localhost(hostname):
