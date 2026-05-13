@@ -48,6 +48,9 @@ async def test_create_view_and_edit_stored_app():
     assert view.status_code == 200
     assert "Hello app" in view.text
     assert "iframe" in view.text
+    assert "datasette-app-request" in view.text
+    assert "capabilities/" in view.text
+    assert "datasette.query" in view.text
     assert "Hello" in view.text
 
     state = await Registry(datasette).get_user_state("alice", app_id)

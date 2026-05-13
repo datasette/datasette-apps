@@ -7,7 +7,7 @@ from datasette import Forbidden, NotFound, Response
 
 from .csp import build_csp
 from .data_access import AppQueryError, run_app_query
-from .rendering import build_app_srcdoc
+from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
 from .registry import Registry
 
 
@@ -100,10 +100,13 @@ async def view_app(datasette, request):
     version = await registry.get_current_version(app_id)
     await registry.record_access(_actor_id(actor), app_id)
     csp = build_csp(await registry.get_csp_origins(app_id))
-    srcdoc = html.escape(build_app_srcdoc(version["html"], csp), quote=True)
+    srcdoc = html.escape(
+        build_app_srcdoc(version["html"], csp, iframe_bridge_script()), quote=True
+    )
     body = f"""
     <p><a href="/-/apps/{html.escape(app_id)}/edit">Edit app</a></p>
-    <iframe sandbox="allow-scripts" csp="{html.escape(csp, quote=True)}" srcdoc="{srcdoc}" style="width: 100%; min-height: 70vh; border: 1px solid #ccc;"></iframe>
+    <iframe id="datasette-app-frame" sandbox="allow-scripts" csp="{html.escape(csp, quote=True)}" srcdoc="{srcdoc}" style="width: 100%; min-height: 70vh; border: 1px solid #ccc;"></iframe>
+    {parent_bridge_script(app_id)}
     """
     return Response.html(_page(app["name"], body))
 

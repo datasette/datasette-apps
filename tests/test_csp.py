@@ -1,7 +1,7 @@
 import pytest
 
 from datasette_apps.csp import build_csp, normalize_connect_origin
-from datasette_apps.rendering import build_app_srcdoc
+from datasette_apps.rendering import build_app_srcdoc, iframe_bridge_script
 
 
 def test_build_csp_defaults_to_no_connect_src():
@@ -46,3 +46,15 @@ def test_build_app_srcdoc_creates_head_if_missing():
 
     assert srcdoc.startswith("<html><head><meta http-equiv=\"Content-Security-Policy\"")
     assert srcdoc.index("Content-Security-Policy") < srcdoc.index("<h1>Hello</h1>")
+
+
+def test_build_app_srcdoc_injects_datasette_query_bridge_after_csp():
+    srcdoc = build_app_srcdoc(
+        "<!DOCTYPE html><html><head><title>Hello</title></head><body></body></html>",
+        "default-src 'none';",
+        iframe_bridge_script(),
+    )
+
+    assert "window.datasette" in srcdoc
+    assert srcdoc.index("Content-Security-Policy") < srcdoc.index("window.datasette")
+    assert srcdoc.index("window.datasette") < srcdoc.index("<title>Hello</title>")
