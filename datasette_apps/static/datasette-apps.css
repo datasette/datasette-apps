@@ -53,6 +53,8 @@
   border: 1px solid #ddd;
   border-radius: 6px;
   padding: 1rem;
+  position: sticky;
+  top: 1rem;
 }
 
 .datasette-app-form h2 {
@@ -275,6 +277,7 @@
 
   .datasette-app-edit-sidebar {
     margin-top: 1.25rem;
+    position: static;
   }
 
   .datasette-app-actions,
