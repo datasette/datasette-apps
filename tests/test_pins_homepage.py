@@ -26,6 +26,7 @@ async def test_pin_routes_and_catalog_order():
     index = await datasette.client.get("/-/apps", actor={"id": "alice"})
     assert index.status_code == 200
     assert 'action="/-/apps/plugin:second/pin"' in index.text
+    assert 'class="datasette-app-button datasette-app-pin-button"' in index.text
     assert 'aria-label="Pin Second app"' in index.text
 
     response = await datasette.client.post(
@@ -40,6 +41,7 @@ async def test_pin_routes_and_catalog_order():
     assert index.status_code == 200
     assert index.text.index("Second app") < index.text.index("First app")
     assert 'action="/-/apps/plugin:second/unpin"' in index.text
+    assert 'class="datasette-app-button datasette-app-pin-button"' in index.text
     assert 'aria-label="Unpin Second app"' in index.text
 
     await datasette.client.post("/-/apps/plugin:second/unpin", actor={"id": "alice"})

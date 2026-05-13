@@ -25,7 +25,7 @@
     <form class="datasette-app-pin-form" method="post" action="/-/apps/{{ app.id }}/{% if app.pinned %}unpin{% else %}pin{% endif %}">
       <input type="hidden" name="next" value="{{ current_path }}">
       <button
-        class="datasette-app-pin-button"
+        class="datasette-app-button datasette-app-pin-button"
         type="submit"
         aria-pressed="{% if app.pinned %}true{% else %}false{% endif %}"
         aria-label="{% if app.pinned %}Unpin{% else %}Pin{% endif %} {{ app.name }}"
