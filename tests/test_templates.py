@@ -1,7 +1,15 @@
+import re
+
 import pytest
 from datasette.app import Datasette
 
 from datasette_apps import Registry
+
+
+def crumb_links(response):
+    match = re.search(r'<p class="crumbs">(.*?)</p>', response.text, flags=re.S)
+    assert match is not None
+    return re.findall(r'<a href="([^"]+)">\s*([^<\s][^<]*?)\s*</a>', match.group(1))
 
 
 async def assert_extends_datasette_base(response):
@@ -33,3 +41,34 @@ async def test_app_pages_extend_datasette_base_template():
     await assert_extends_datasette_base(
         await datasette.client.get(f"/-/apps/{app['id']}/edit", actor={"id": "alice"})
     )
+
+
+@pytest.mark.asyncio
+async def test_app_pages_show_breadcrumbs_to_apps_list():
+    datasette = Datasette(memory=True)
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Crumb app",
+        description="",
+        html="<h1>Hello</h1>",
+    )
+
+    list_response = await datasette.client.get("/-/apps", actor={"id": "alice"})
+    create_response = await datasette.client.get(
+        "/-/apps/create", actor={"id": "alice"}
+    )
+    view_response = await datasette.client.get(
+        f"/-/apps/{app['id']}", actor={"id": "alice"}
+    )
+    edit_response = await datasette.client.get(
+        f"/-/apps/{app['id']}/edit", actor={"id": "alice"}
+    )
+
+    assert crumb_links(list_response) == [("/", "home")]
+    assert crumb_links(create_response) == [("/", "home"), ("/-/apps", "apps")]
+    assert crumb_links(view_response) == [("/", "home"), ("/-/apps", "apps")]
+    assert crumb_links(edit_response) == [
+        ("/", "home"),
+        ("/-/apps", "apps"),
+        (f"/-/apps/{app['id']}", "Crumb app"),
+    ]

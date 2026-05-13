@@ -2,6 +2,11 @@
 
 {% block title %}{{ app.name }}{% endblock %}
 
+{% block crumbs %}
+{% import "_app_crumbs.html" as app_crumbs with context %}
+{{ app_crumbs.nav(request=request) }}
+{% endblock %}
+
 {% block content %}
 <div class="datasette-app-view-header">
   <h1>{{ app.name }}</h1>

@@ -1,0 +1,17 @@
+{% macro nav(request, app=None) -%}
+{% set root_items = [] %}
+{% if crumb_items is defined %}
+  {% set root_items=crumb_items(request=request) %}
+{% endif %}
+<p class="crumbs">
+  {% for item in root_items %}
+    <a href="{{ item.href }}">{{ item.label }}</a>
+    /
+  {% endfor %}
+  <a href="/-/apps">apps</a>
+  {% if app %}
+    /
+    <a href="{{ app.path }}">{{ app.name }}</a>
+  {% endif %}
+</p>
+{%- endmacro %}

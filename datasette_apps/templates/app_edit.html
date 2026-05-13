@@ -2,6 +2,11 @@
 
 {% block title %}Edit {{ app.name }}{% endblock %}
 
+{% block crumbs %}
+{% import "_app_crumbs.html" as app_crumbs with context %}
+{{ app_crumbs.nav(request=request, app=app) }}
+{% endblock %}
+
 {% block extra_head %}
 {{ codemirror_assets|safe }}
 {% endblock %}
