@@ -52,7 +52,7 @@ def _app_link(app):
 async def apps_index(datasette, request):
     actor = _require_actor(request)
     registry = Registry(datasette)
-    apps = await registry.list_apps(q=request.args.get("q"))
+    apps = await registry.list_apps(q=request.args.get("q"), actor_id=_actor_id(actor))
     items = []
     for app in apps:
         if not await datasette.allowed(
@@ -170,6 +170,28 @@ async def app_json(datasette, request):
     return Response.json({"app": app, "version": version})
 
 
+async def pin_app(datasette, request):
+    actor = _require_actor(request)
+    app_id = request.url_vars["id"]
+    registry = Registry(datasette)
+    if await registry.get_app(app_id) is None:
+        raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "view-app", app_id)
+    await registry.set_pinned(_actor_id(actor), app_id, True)
+    return Response.redirect("/-/apps")
+
+
+async def unpin_app(datasette, request):
+    actor = _require_actor(request)
+    app_id = request.url_vars["id"]
+    registry = Registry(datasette)
+    if await registry.get_app(app_id) is None:
+        raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "view-app", app_id)
+    await registry.set_pinned(_actor_id(actor), app_id, False)
+    return Response.redirect("/-/apps")
+
+
 async def capability_request(datasette, request):
     actor = _require_actor(request)
     app_id = request.url_vars["id"]
@@ -213,3 +235,33 @@ async def launch_app(datasette, request):
         return Response.redirect(app["path"])
     await registry.record_access(_actor_id(actor), app_id)
     return Response.redirect(app["path"])
+
+
+async def top_homepage_html(datasette, request):
+    if not request.actor:
+        return ""
+    actor = request.actor
+    registry = Registry(datasette)
+    apps = []
+    for app in await registry.list_pinned_apps(_actor_id(actor), limit=3):
+        if await datasette.allowed(
+            action="view-app", resource=AppResource(app["id"]), actor=actor
+        ):
+            apps.append(app)
+    if not apps:
+        return ""
+    cards = []
+    for app in apps:
+        cards.append(
+            '<article class="datasette-app-card">'
+            f'<h3><a href="{html.escape(_app_link(app), quote=True)}">{html.escape(app["name"])}</a></h3>'
+            f'<p>{html.escape(app["description"])}</p>'
+            "</article>"
+        )
+    return (
+        '<section class="datasette-apps-homepage">'
+        "<h2>Pinned apps</h2>"
+        '<div class="datasette-app-card-grid">'
+        + "".join(cards)
+        + "</div></section>"
+    )

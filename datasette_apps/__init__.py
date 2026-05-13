@@ -9,6 +9,9 @@ from .views import (
     create_app,
     edit_app,
     launch_app,
+    pin_app,
+    top_homepage_html,
+    unpin_app,
     view_app,
 )
 
@@ -23,6 +26,8 @@ def register_routes():
         (r"^/-/apps/create$", create_app),
         (r"^/-/apps/(?P<id>[^/]+)\.json$", app_json),
         (r"^/-/apps/(?P<id>[^/]+)/edit$", edit_app),
+        (r"^/-/apps/(?P<id>[^/]+)/pin$", pin_app),
+        (r"^/-/apps/(?P<id>[^/]+)/unpin$", unpin_app),
         (r"^/-/apps/(?P<id>[^/]+)/launch$", launch_app),
         (
             r"^/-/apps/(?P<id>[^/]+)/capabilities/(?P<capability>[^/]+)$",
@@ -45,3 +50,8 @@ def permission_resources_sql(datasette, actor, action):
 @hookimpl
 async def startup(datasette):
     await Registry(datasette).ensure_tables()
+
+
+@hookimpl
+def top_homepage(datasette, request):
+    return top_homepage_html(datasette, request)

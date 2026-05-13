@@ -248,28 +248,66 @@ class Registry:
         result = await self.db.execute("SELECT * FROM apps WHERE id = :id", {"id": id})
         return _row_to_app(result.first())
 
-    async def list_apps(self, q=None, limit=20):
+    async def list_apps(self, q=None, limit=20, actor_id=None):
         await self.ensure_tables()
         fts = _fts_query(q)
+        join_user_state = ""
+        order_by = "apps.updated_at DESC, apps.id"
+        params = {"limit": limit}
+        if actor_id:
+            join_user_state = """
+                LEFT JOIN app_user_state
+                    ON app_user_state.app_id = apps.id
+                   AND app_user_state.actor_id = :actor_id
+            """
+            order_by = """
+                pinned_at IS NOT NULL DESC,
+                CASE
+                    WHEN pinned_at IS NOT NULL THEN COALESCE(last_accessed_at, pinned_at)
+                    ELSE last_accessed_at
+                END DESC,
+                apps.updated_at DESC,
+                apps.id
+            """
+            params["actor_id"] = actor_id
         if fts:
             sql = """
                 SELECT apps.*
                 FROM apps
                 JOIN apps_fts ON apps.rowid = apps_fts.rowid
+                {join_user_state}
                 WHERE apps_fts MATCH :q
-                ORDER BY apps.updated_at DESC, apps.id
+                ORDER BY {order_by}
                 LIMIT :limit
-            """
-            params = {"q": fts, "limit": limit}
+            """.format(join_user_state=join_user_state, order_by=order_by)
+            params["q"] = fts
         else:
             sql = """
-                SELECT *
+                SELECT apps.*
                 FROM apps
-                ORDER BY updated_at DESC, id
+                {join_user_state}
+                ORDER BY {order_by}
                 LIMIT :limit
-            """
-            params = {"limit": limit}
+            """.format(join_user_state=join_user_state, order_by=order_by)
         result = await self.db.execute(sql, params)
+        return [_row_to_app(row) for row in result.rows]
+
+    async def list_pinned_apps(self, actor_id, limit=3):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT apps.*
+            FROM apps
+            JOIN app_user_state ON app_user_state.app_id = apps.id
+            WHERE app_user_state.actor_id = :actor_id
+              AND app_user_state.pinned_at IS NOT NULL
+            ORDER BY
+              COALESCE(app_user_state.last_accessed_at, app_user_state.pinned_at) DESC,
+              apps.id DESC
+            LIMIT :limit
+            """,
+            {"actor_id": actor_id, "limit": limit},
+        )
         return [_row_to_app(row) for row in result.rows]
 
     async def record_access(self, actor_id, app_id):
