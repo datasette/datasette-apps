@@ -178,6 +178,37 @@ class Registry:
 
         await self.db.execute_write_fn(save)
 
+    async def update_stored_app(self, app_id, name, description, html):
+        await self.ensure_tables()
+        now = _now()
+
+        def save(conn):
+            row = conn.execute(
+                "SELECT current_version, external FROM apps WHERE id = ?", (app_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(app_id)
+            if row["external"]:
+                raise ValueError("External apps cannot be edited by datasette-apps")
+            next_version = int(row["current_version"] or 0) + 1
+            conn.execute(
+                """
+                INSERT INTO app_versions (app_id, version, html, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (app_id, next_version, html, now),
+            )
+            conn.execute(
+                """
+                UPDATE apps
+                SET name = ?, description = ?, current_version = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (name, description or "", next_version, now, app_id),
+            )
+
+        await self.db.execute_write_fn(save)
+
     async def get_current_version(self, app_id):
         await self.ensure_tables()
         result = await self.db.execute(
