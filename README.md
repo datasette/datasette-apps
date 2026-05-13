@@ -29,6 +29,8 @@ This plugin allows you to create and modify HTML apps, and provides a plugin hoo
 - `/-/apps/create` for creating a new app
 - `/-/apps/ULID/edit` to edit an existing app
 
+Signed-in users get an "Apps" link in Datasette's top-right menu.
+
 HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and store every edit as a new row in `app_versions`.
 
 Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` `connect-src` origins configured, and localhost origins are never allowed.

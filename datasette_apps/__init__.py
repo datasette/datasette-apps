@@ -60,3 +60,10 @@ async def startup(datasette):
 @hookimpl
 def top_homepage(datasette, request):
     return top_homepage_html(datasette, request)
+
+
+@hookimpl
+def menu_links(datasette, actor, request):
+    if not actor:
+        return []
+    return [{"href": datasette.urls.path("/-/apps"), "label": "Apps"}]
