@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Datasette apps homepage card mockup</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <style>
+    /* Datasette app.css excerpts: reset, base typography, header, links, content, buttons */
+    html, body, div, span, h1, h2, h3, h4, p, a, code, em, strong,
+    section, article, header, nav, footer, ul, li, form, label, input, button {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      font-size: 100%;
+      font: inherit;
+      vertical-align: baseline;
+    }
+    header, nav, section, article, footer {
+      display: block;
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: "Helvetica Neue", sans-serif;
+      font-size: 1rem;
+      font-weight: 400;
+      line-height: 1.5;
+      color: #111A35;
+      text-align: left;
+      background-color: #F8FAFB;
+    }
+    strong { font-weight: bold; }
+    em { font-style: italic; }
+    p {
+      margin: 0 0 0.75rem 0;
+      padding: 0;
+    }
+    h1, h2, h3, h4 {
+      font-weight: 700;
+      font-size: 1rem;
+      margin: 0;
+      padding: 0;
+      word-break: break-word;
+    }
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 0.75rem;
+      margin-top: 1rem;
+    }
+    h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+      margin-top: 1rem;
+    }
+    h3 {
+      font-size: 1.25rem;
+      margin: 1rem 0 0.25rem 0;
+    }
+    a:link {
+      color: #276890;
+      text-decoration: underline;
+    }
+    a:visited {
+      color: #54AC8E;
+      text-decoration: underline;
+    }
+    a:hover,
+    a:focus,
+    a:active {
+      color: #67C98D;
+      text-decoration: underline;
+    }
+    code {
+      font-family: monospace;
+    }
+    header.hd,
+    footer.ft {
+      padding: 0.6rem 1rem 0.5rem 1rem;
+      background-color: #276890;
+      background: linear-gradient(180deg, rgba(96,144,173,1) 0%, rgba(39,104,144,1) 50%);
+      color: rgba(255,255,244,0.9);
+      overflow: hidden;
+      box-sizing: border-box;
+      min-height: 2.6rem;
+    }
+    header.hd .crumbs {
+      float: left;
+    }
+    header.hd .actor {
+      float: right;
+      text-align: right;
+      padding-left: 1rem;
+      padding-right: 1rem;
+      position: relative;
+      top: -3px;
+    }
+    header.hd a:link,
+    header.hd a:visited,
+    header.hd a:hover,
+    header.hd a:focus,
+    header.hd a:active {
+      color: rgba(255,255,244,0.8);
+      text-decoration: none;
+    }
+    header.hd a:hover,
+    header.hd a:focus,
+    header.hd a:active {
+      color: rgba(255,255,244,1);
+    }
+    section.content {
+      margin: 0 1rem;
+    }
+    .core input[type=search] {
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      width: 60%;
+      padding: 9px 4px;
+      display: inline-block;
+      font-size: 1em;
+      font-family: Helvetica, sans-serif;
+      -webkit-appearance: textfield;
+    }
+    .core input[type=submit],
+    .core button[type=button],
+    a.core-button {
+      font-weight: 400;
+      cursor: pointer;
+      text-align: center;
+      vertical-align: middle;
+      border-width: 1px;
+      border-style: solid;
+      padding: .5em 0.8em;
+      font-size: 0.9rem;
+      line-height: 1;
+      border-radius: .25rem;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .core input[type=submit],
+    a.core-button.primary {
+      color: #fff;
+      background: linear-gradient(180deg, #007bff 0%, #4E79C7 100%);
+      border-color: #007bff;
+    }
+    .core button[type=button],
+    a.core-button.secondary {
+      color: #007bff;
+      background-color: #fff;
+      border-color: #007bff;
+    }
+
+    /* Mockup-specific app card styles */
+    .homepage-apps {
+      margin-top: 1.6rem;
+      margin-bottom: 1.8rem;
+    }
+    .homepage-apps-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.6rem;
+    }
+    .homepage-apps-header h2 {
+      margin: 0;
+      padding-left: 10px;
+      border-left: 10px solid #54AC8E;
+      line-height: 1.2;
+    }
+    .homepage-apps-header p {
+      margin: 0;
+      color: rgba(0,0,0,0.48);
+      font-size: 0.9rem;
+    }
+    .app-card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.85rem;
+      margin-top: 0.8rem;
+    }
+    .app-card {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 0.7rem;
+      background: #fff;
+      border: 1px solid rgba(39,104,144,0.22);
+      border-radius: 6px;
+      padding: 0.9rem;
+      box-shadow: 0 1px 2px rgba(17,26,53,0.06);
+    }
+    .app-card-title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.7rem;
+    }
+    .app-card h3 {
+      margin: 0;
+      font-size: 1.08rem;
+      line-height: 1.25;
+    }
+    .app-card h3 a {
+      text-decoration: none;
+    }
+    .app-card-description {
+      color: rgba(17,26,53,0.78);
+      font-size: 0.94rem;
+      margin-bottom: 0;
+    }
+    .app-card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      align-items: center;
+      color: rgba(0,0,0,0.5);
+      font-size: 0.78rem;
+    }
+    .app-badge {
+      display: inline-block;
+      border: 1px solid rgba(39,104,144,0.2);
+      border-radius: 999px;
+      padding: 0.1rem 0.45rem;
+      background: #F8FAFB;
+      color: #276890;
+      font-size: 0.72rem;
+      line-height: 1.5;
+      white-space: nowrap;
+    }
+    .app-badge.pinned {
+      border-color: rgba(84,172,142,0.35);
+      color: #2D7A62;
+      background: rgba(84,172,142,0.12);
+    }
+    .app-badge.external {
+      border-color: rgba(245,166,35,0.35);
+      color: #8a5d12;
+      background: rgba(245,166,35,0.14);
+    }
+    .app-card-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.6rem;
+      border-top: 1px solid rgba(39,104,144,0.12);
+      padding-top: 0.65rem;
+    }
+    .app-card-actions .last-used {
+      color: rgba(0,0,0,0.45);
+      font-size: 0.78rem;
+      min-width: 0;
+    }
+    .app-search {
+      margin-top: 1rem;
+      padding: 0.85rem;
+      background: rgba(255,255,255,0.68);
+      border: 1px solid rgba(39,104,144,0.16);
+      border-radius: 6px;
+    }
+    .app-search label {
+      display: inline-block;
+      font-weight: bold;
+      margin-right: 0.5rem;
+    }
+    @media (max-width: 880px) {
+      .homepage-apps-header {
+        display: block;
+      }
+      .homepage-apps-header p {
+        margin-top: 0.35rem;
+      }
+      .app-card-grid {
+        grid-template-columns: 1fr;
+      }
+      .core input[type=search] {
+        width: 100%;
+        margin-top: 0.4rem;
+      }
+      .app-search label {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body class="index">
+<div class="not-footer">
+  <header class="hd">
+    <nav>
+      <p class="crumbs"><a href="/">home</a></p>
+      <div class="actor"><strong>simon</strong></div>
+    </nav>
+  </header>
+
+  <section class="content">
+    <h1>Datasette</h1>
+
+    <section class="homepage-apps" aria-labelledby="homepage-apps-heading">
+      <div class="homepage-apps-header">
+        <div>
+          <h2 id="homepage-apps-heading">Pinned apps</h2>
+          <p>Most recently used pinned apps for this account.</p>
+        </div>
+        <p><a href="/-/apps">Browse all apps</a></p>
+      </div>
+
+      <div class="app-card-grid">
+        <article class="app-card">
+          <div class="app-card-title-row">
+            <h3><a href="/-/apps/01HXAMPLEAPP000000000001/launch">Newsroom brief</a></h3>
+            <span class="app-badge pinned">Pinned</span>
+          </div>
+          <p class="app-card-description">Draft story summaries from the news and authors tables, with a tightly scoped write query for publishing notes.</p>
+          <div>
+            <p class="app-card-meta">
+              <span class="app-badge">HTML app</span>
+              <span>news, authors</span>
+            </p>
+          </div>
+          <div class="app-card-actions">
+            <span class="last-used">Used 12 minutes ago</span>
+            <a class="core-button primary" href="/-/apps/01HXAMPLEAPP000000000001/launch">Open</a>
+          </div>
+        </article>
+
+        <article class="app-card">
+          <div class="app-card-title-row">
+            <h3><a href="/-/apps/01HXAMPLEAPP000000000002/launch">Traffic monitor</a></h3>
+            <span class="app-badge pinned">Pinned</span>
+          </div>
+          <p class="app-card-description">A compact dashboard for daily visits, referrers, and slow queries across the stats tables.</p>
+          <div>
+            <p class="app-card-meta">
+              <span class="app-badge">HTML app</span>
+              <span>stats</span>
+            </p>
+          </div>
+          <div class="app-card-actions">
+            <span class="last-used">Used yesterday</span>
+            <a class="core-button primary" href="/-/apps/01HXAMPLEAPP000000000002/launch">Open</a>
+          </div>
+        </article>
+
+        <article class="app-card">
+          <div class="app-card-title-row">
+            <h3><a href="/-/apps/github:issues/launch">GitHub triage</a></h3>
+            <span class="app-badge external">Plugin</span>
+          </div>
+          <p class="app-card-description">Review open issues and recent releases from a plugin-provided workflow.</p>
+          <div>
+            <p class="app-card-meta">
+              <span class="app-badge pinned">Pinned</span>
+              <span>datasette-github</span>
+            </p>
+          </div>
+          <div class="app-card-actions">
+            <span class="last-used">Used May 10</span>
+            <a class="core-button primary" href="/-/apps/github:issues/launch">Open</a>
+          </div>
+        </article>
+      </div>
+
+      <form class="core app-search" action="/-/apps" method="get">
+        <label for="app-q">Find apps</label>
+        <input id="app-q" type="search" name="q" placeholder="Search apps by name, table, or plugin">
+        <input type="submit" value="Search">
+      </form>
+    </section>
+
+    <h2 style="padding-left: 10px; border-left: 10px solid #97b74e;"><a href="/fixtures">fixtures</a></h2>
+    <p>1,500 rows in 24 tables, 3 views</p>
+    <p><a href="/fixtures/facetable">facetable</a>, <a href="/fixtures/searchable">searchable</a>, <a href="/fixtures/roadside_attractions">roadside_attractions</a>, <a href="/fixtures">...</a></p>
+
+    <h2 style="padding-left: 10px; border-left: 10px solid #c74e7f;"><a href="/news">news</a></h2>
+    <p>84,210 rows in 6 tables</p>
+    <p><a href="/news/articles">articles</a>, <a href="/news/authors">authors</a>, <a href="/news/tags">tags</a></p>
+  </section>
+</div>
+
+<footer class="ft">
+  <p>Powered by Datasette</p>
+</footer>
+</body>
+</html>
