@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import html
+import json
 
 from datasette import Forbidden, NotFound, Response
 
 from .csp import build_csp
+from .data_access import AppQueryError, run_app_query
 from .rendering import build_app_srcdoc
 from .registry import Registry
 
@@ -144,6 +146,36 @@ async def app_json(datasette, request):
         raise NotFound("App not found")
     version = await registry.get_current_version(app_id)
     return Response.json({"app": app, "version": version})
+
+
+async def capability_request(datasette, request):
+    actor = _require_actor(request)
+    app_id = request.url_vars["id"]
+    capability = request.url_vars["capability"]
+    registry = Registry(datasette)
+    app = await registry.get_app(app_id)
+    if app is None or app["external"]:
+        raise NotFound("App not found")
+    if capability != "datasette.query":
+        return Response.json(
+            {"ok": False, "error": f"Unknown capability: {capability}"},
+            status=404,
+        )
+    try:
+        body = json.loads((await request.post_body()).decode("utf-8") or "{}")
+        result = await run_app_query(
+            datasette,
+            app,
+            actor,
+            body["database"],
+            body["sql"],
+            body.get("params"),
+        )
+        return Response.json({"ok": True, "result": result})
+    except (KeyError, json.JSONDecodeError) as e:
+        return Response.json({"ok": False, "error": f"Invalid request: {e}"})
+    except AppQueryError as e:
+        return Response.json({"ok": False, "error": str(e)})
 
 
 async def launch_app(datasette, request):

@@ -33,6 +33,8 @@ HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and 
 
 Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` `connect-src` origins configured, and localhost origins are never allowed.
 
+Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. Those queries are read-only and are limited to the intersection of the current actor's Datasette permissions and the app's own table/view/column grants.
+
 Plugins can add their own apps to the central catalog during startup:
 
 ```python
