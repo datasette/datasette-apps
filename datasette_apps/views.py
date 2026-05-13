@@ -79,7 +79,16 @@ def _app_link(app):
 async def apps_index(datasette, request):
     actor = _require_actor(request)
     registry = Registry(datasette)
-    apps = await registry.list_apps(q=request.args.get("q"), actor_id=_actor_id(actor))
+    page_size = 20
+    offset = int(request.args.get("next") or "0")
+    apps = await registry.list_apps(
+        q=request.args.get("q"),
+        limit=page_size + 1,
+        offset=offset,
+        actor_id=_actor_id(actor),
+    )
+    has_next = len(apps) > page_size
+    apps = apps[:page_size]
     items = []
     for app in apps:
         if not await datasette.allowed(
@@ -93,6 +102,14 @@ async def apps_index(datasette, request):
             f"<p>{html.escape(app['description'])}</p>"
             "</li>"
         )
+    next_link = ""
+    if has_next:
+        next_offset = offset + page_size
+        q = request.args.get("q")
+        href = f"/-/apps?next={next_offset}"
+        if q:
+            href += f"&q={html.escape(q, quote=True)}"
+        next_link = f'<p><a rel="next" href="{href}">Next</a></p>'
     body = """
     <p><a href="/-/apps/create">Create app</a></p>
     <form method="get" action="/-/apps">
@@ -100,8 +117,10 @@ async def apps_index(datasette, request):
       <button type="submit">Search</button>
     </form>
     <ul>{}</ul>
+    {}
     """.format(
-        "\n".join(items)
+        "\n".join(items),
+        next_link,
     )
     return Response.html(_page("Apps", body))
 

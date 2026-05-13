@@ -39,6 +39,8 @@ The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-a
 
 Signed-in users can pin apps from the catalog. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
 
+The `/-/apps` catalog is searchable and paginated, using a `next` cursor in the URL for subsequent pages.
+
 The create page includes a copyable prompt for an LLM. The prompt explains the sandbox, the `datasette.query()` bridge, CSP restrictions, and includes a schema summary limited to tables and views the current actor can see.
 
 The create and edit pages use Datasette's existing bundled CodeMirror editor for the HTML source textarea.

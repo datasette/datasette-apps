@@ -249,12 +249,12 @@ class Registry:
         result = await self.db.execute("SELECT * FROM apps WHERE id = :id", {"id": id})
         return _row_to_app(result.first())
 
-    async def list_apps(self, q=None, limit=20, actor_id=None):
+    async def list_apps(self, q=None, limit=20, offset=0, actor_id=None):
         await self.ensure_tables()
         fts = _fts_query(q)
         join_user_state = ""
         order_by = "apps.updated_at DESC, apps.id"
-        params = {"limit": limit}
+        params = {"limit": limit, "offset": offset}
         if actor_id:
             join_user_state = """
                 LEFT JOIN app_user_state
@@ -279,7 +279,7 @@ class Registry:
                 {join_user_state}
                 WHERE apps_fts MATCH :q
                 ORDER BY {order_by}
-                LIMIT :limit
+                LIMIT :limit OFFSET :offset
             """.format(join_user_state=join_user_state, order_by=order_by)
             params["q"] = fts
         else:
@@ -288,7 +288,7 @@ class Registry:
                 FROM apps
                 {join_user_state}
                 ORDER BY {order_by}
-                LIMIT :limit
+                LIMIT :limit OFFSET :offset
             """.format(join_user_state=join_user_state, order_by=order_by)
         result = await self.db.execute(sql, params)
         return [_row_to_app(row) for row in result.rows]
