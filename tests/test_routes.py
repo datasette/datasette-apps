@@ -53,6 +53,14 @@ async def test_create_view_and_edit_stored_app():
     assert "datasette.query" in view.text
     assert "Hello" in view.text
 
+    edit_form = await datasette.client.get(
+        f"/-/apps/{app_id}/edit", actor={"id": "alice"}
+    )
+    assert edit_form.status_code == 200
+    assert "cm-editor-6.0.1.bundle.js" in edit_form.text
+    assert 'textarea id="html-editor"' in edit_form.text
+    assert "cm.editorFromTextArea" in edit_form.text
+
     state = await Registry(datasette).get_user_state("alice", app_id)
     assert state["access_count"] == 1
 

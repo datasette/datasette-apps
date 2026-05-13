@@ -41,6 +41,8 @@ Signed-in users can pin apps from the catalog. Pinned apps appear first on `/-/a
 
 The create page includes a copyable prompt for an LLM. The prompt explains the sandbox, the `datasette.query()` bridge, CSP restrictions, and includes a schema summary limited to tables and views the current actor can see.
 
+The create and edit pages use Datasette's existing bundled CodeMirror editor for the HTML source textarea.
+
 Plugins can add their own apps to the central catalog during startup:
 
 ```python

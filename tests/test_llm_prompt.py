@@ -30,6 +30,9 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
 
     assert response.status_code == 200
+    assert "cm-editor-6.0.1.bundle.js" in response.text
+    assert 'textarea id="html-editor"' in response.text
+    assert "cm.editorFromTextArea" in response.text
     assert "Copy prompt" in response.text
     assert "id=\"llm-prompt\"" in response.text
     assert "datasette.query(database, sql, params?)" in response.text

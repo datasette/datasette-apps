@@ -44,6 +44,29 @@ def _page(title, body):
 </html>"""
 
 
+def _codemirror_assets():
+    return """
+<script src="/-/static/cm-editor-6.0.1.bundle.js"></script>
+<style>
+  .cm-editor {
+    resize: vertical;
+    overflow: hidden;
+    width: min(100%, 1000px);
+    min-height: 28rem;
+    border: 1px solid #ddd;
+  }
+</style>
+<script>
+window.addEventListener("DOMContentLoaded", function() {
+  var htmlInput = document.querySelector("textarea#html-editor");
+  if (htmlInput && window.cm && window.cm.editorFromTextArea) {
+    cm.editorFromTextArea(htmlInput, {schema: {}});
+  }
+});
+</script>
+"""
+
+
 def _app_link(app):
     if app["external"]:
         return f"/-/apps/{app['id']}/launch"
@@ -92,7 +115,7 @@ async def create_app(datasette, request):
         <form method="post">
           <p><label>Name <input type="text" name="name"></label></p>
           <p><label>Description <input type="text" name="description"></label></p>
-          <p><label>HTML <textarea name="html"></textarea></label></p>
+          <p><label>HTML <textarea id="html-editor" name="html"></textarea></label></p>
           <p><button type="submit">Create app</button></p>
         </form>
         <section>
@@ -105,6 +128,7 @@ async def create_app(datasette, request):
           await navigator.clipboard.writeText(document.getElementById("llm-prompt").value);
         }});
         </script>
+        {_codemirror_assets()}
         """
         return Response.html(_page("Create app", body))
 
@@ -154,9 +178,10 @@ async def edit_app(datasette, request):
         <form method="post">
           <p><label>Name <input type="text" name="name" value="{html.escape(app['name'], quote=True)}"></label></p>
           <p><label>Description <input type="text" name="description" value="{html.escape(app['description'], quote=True)}"></label></p>
-          <p><label>HTML <textarea name="html">{html.escape(version['html'])}</textarea></label></p>
+          <p><label>HTML <textarea id="html-editor" name="html">{html.escape(version['html'])}</textarea></label></p>
           <p><button type="submit">Save app</button></p>
         </form>
+        {_codemirror_assets()}
         """
         return Response.html(_page(f"Edit {app['name']}", body))
 
