@@ -29,6 +29,24 @@ This plugin allows you to create and modify HTML apps, and provides a plugin hoo
 - `/-/apps/create` for creating a new app
 - `/-/apps/ULID/edit` to edit an existing app
 
+Plugins can add their own apps to the central catalog during startup:
+
+```python
+from datasette import hookimpl
+from datasette_apps import Registry
+
+
+@hookimpl
+async def startup(datasette):
+    await Registry(datasette).add_app(
+        id="myplugin:example",
+        name="Example plugin app",
+        description="A plugin-owned app that appears in /-/apps",
+        path="/-/myplugin-example",
+        source="myplugin",
+    )
+```
+
 ## Development
 
 To set up this plugin locally, first checkout the code. You can confirm it is available like this:
