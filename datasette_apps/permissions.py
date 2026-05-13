@@ -74,7 +74,7 @@ def app_permission_sql(actor, action):
         "edit-app": "Owner can edit app",
         "manage-app-access": "Owner can manage app access",
     }
-    sql = f"""
+    sql = """
     SELECT 'apps' AS parent,
            id AS child,
            1 AS allow,

@@ -327,9 +327,8 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
   });
 })();
 </script>"""
-    return (
-        script.replace("__IFRAME_ID__", _json_script_string(iframe_id))
-        .replace("__ENDPOINT_BASE__", _json_script_string(endpoint_base))
+    return script.replace("__IFRAME_ID__", _json_script_string(iframe_id)).replace(
+        "__ENDPOINT_BASE__", _json_script_string(endpoint_base)
     )
 
 

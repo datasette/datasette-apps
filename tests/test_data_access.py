@@ -10,15 +10,13 @@ from datasette_apps import Registry
 def create_database(tmp_path):
     db_path = tmp_path / "content.db"
     conn = sqlite3.connect(db_path)
-    conn.executescript(
-        """
+    conn.executescript("""
         create table news (id integer primary key, title text);
         insert into news (title) values ('First'), ('Second');
         create table private_notes (id integer primary key, body text);
         insert into private_notes (body) values ('Secret');
         create view recent_news as select title from news;
-        """
-    )
+        """)
     conn.close()
     return db_path
 

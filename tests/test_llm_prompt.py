@@ -7,8 +7,7 @@ from datasette.app import Datasette
 def create_database(tmp_path):
     db_path = tmp_path / "content.db"
     conn = sqlite3.connect(db_path)
-    conn.executescript(
-        """
+    conn.executescript("""
         create table authors (id integer primary key, name text);
         create table news (
             id integer primary key,
@@ -17,8 +16,7 @@ def create_database(tmp_path):
         );
         insert into authors (name) values ('Ada');
         insert into news (title, author_id) values ('Launch', 1);
-        """
-    )
+        """)
     conn.close()
     return db_path
 
@@ -39,12 +37,18 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     assert 'textarea id="html-editor"' in response.text
     assert "cm.editorFromTextArea" in response.text
     assert "Copy prompt" in response.text
-    assert "id=\"llm-prompt\"" in response.text
+    assert 'id="llm-prompt"' in response.text
     assert "datasette.query(database, sql, params?)" in response.text
     assert "databases enabled for this app" in response.text
     assert "Content Security Policy" in response.text
-    assert "External script tags are allowed from those same exact https:// origins" in response.text
-    assert "External stylesheet links and style elements are allowed from those same exact https:// origins" in response.text
+    assert (
+        "External script tags are allowed from those same exact https:// origins"
+        in response.text
+    )
+    assert (
+        "External stylesheet links and style elements are allowed from those same exact https:// origins"
+        in response.text
+    )
     assert "Database: content" in response.text
     assert "table: news" in response.text
     assert "title TEXT" in response.text

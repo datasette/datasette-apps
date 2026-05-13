@@ -4,7 +4,6 @@ import secrets
 import threading
 import time
 
-
 _ENCODING = "0123456789abcdefghjkmnpqrstvwxyz"
 _LOCK = threading.Lock()
 _LAST_MS = -1

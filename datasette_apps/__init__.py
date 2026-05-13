@@ -17,7 +17,6 @@ from .views import (
     view_app,
 )
 
-
 __all__ = ["Registry"]
 
 

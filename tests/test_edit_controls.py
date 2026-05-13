@@ -40,11 +40,15 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert "Capabilities" not in response.text
     assert "Capability grants JSON" not in response.text
     assert 'name="capability_grants"' not in response.text
-    assert response.text.index('class="datasette-app-edit-sidebar"') < response.text.index(
-        "App access"
+    assert response.text.index(
+        'class="datasette-app-edit-sidebar"'
+    ) < response.text.index("App access")
+    assert response.text.index("App access") < response.text.index(
+        "Read-only data access"
     )
-    assert response.text.index("App access") < response.text.index("Read-only data access")
-    assert response.text.index("Read-only data access") < response.text.index("Save app")
+    assert response.text.index("Read-only data access") < response.text.index(
+        "Save app"
+    )
 
 
 @pytest.mark.asyncio

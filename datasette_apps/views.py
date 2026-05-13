@@ -249,7 +249,9 @@ async def edit_app(datasette, request):
     if "access_mode" in post:
         actor_ids = [
             actor_id.strip()
-            for actor_id in (post.get("actor_ids") or "").replace(",", "\n").splitlines()
+            for actor_id in (post.get("actor_ids") or "")
+            .replace(",", "\n")
+            .splitlines()
             if actor_id.strip()
         ]
         await registry.set_access_mode(
@@ -410,7 +412,5 @@ async def top_homepage_html(datasette, request):
     return (
         '<section class="datasette-apps-homepage">'
         "<h2>Pinned apps</h2>"
-        '<div class="datasette-app-card-grid">'
-        + "".join(cards)
-        + "</div></section>"
+        '<div class="datasette-app-card-grid">' + "".join(cards) + "</div></section>"
     )

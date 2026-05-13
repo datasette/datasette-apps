@@ -48,14 +48,18 @@ def test_build_app_srcdoc_preserves_doctype_and_inserts_csp_first_in_head():
         "default-src 'none';",
     )
 
-    assert srcdoc.startswith("<!DOCTYPE html><html><head><meta http-equiv=\"Content-Security-Policy\"")
-    assert srcdoc.index("Content-Security-Policy") < srcdoc.index("<title>Hello</title>")
+    assert srcdoc.startswith(
+        '<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy"'
+    )
+    assert srcdoc.index("Content-Security-Policy") < srcdoc.index(
+        "<title>Hello</title>"
+    )
 
 
 def test_build_app_srcdoc_creates_head_if_missing():
     srcdoc = build_app_srcdoc("<h1>Hello</h1>", "default-src 'none';")
 
-    assert srcdoc.startswith("<html><head><meta http-equiv=\"Content-Security-Policy\"")
+    assert srcdoc.startswith('<html><head><meta http-equiv="Content-Security-Policy"')
     assert srcdoc.index("Content-Security-Policy") < srcdoc.index("<h1>Hello</h1>")
 
 

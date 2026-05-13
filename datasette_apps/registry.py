@@ -504,7 +504,13 @@ class Registry:
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 [
-                    (app_id, capability, json.dumps(config or {}, sort_keys=True), now, now)
+                    (
+                        app_id,
+                        capability,
+                        json.dumps(config or {}, sort_keys=True),
+                        now,
+                        now,
+                    )
                     for capability, config in grants.items()
                 ],
             )
