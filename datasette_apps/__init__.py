@@ -1,5 +1,7 @@
 from datasette import hookimpl
+from datasette.plugins import pm
 
+from . import hookspecs
 from .permissions import app_permission_sql, register_app_actions
 from .registry import Registry
 from .views import (
@@ -17,6 +19,9 @@ from .views import (
 
 
 __all__ = ["Registry"]
+
+
+pm.add_hookspecs(hookspecs)
 
 
 @hookimpl

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from .db import ensure_tables
 from .ids import monotonic_ulid
 from .csp import normalize_connect_origin
+from .capabilities import validate_capability_name
 
 
 def _now():
@@ -441,3 +442,42 @@ class Registry:
             )
 
         await self.db.execute_write_fn(save)
+
+    async def get_capability_grant(self, app_id, capability):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT *
+            FROM app_capability_grants
+            WHERE app_id = :app_id AND capability = :capability
+            """,
+            {"app_id": app_id, "capability": capability},
+        )
+        row = result.first()
+        if row is None:
+            return None
+        grant = dict(row)
+        grant["config"] = _decode_json(grant["config"], {})
+        return grant
+
+    async def set_capability_grant(self, app_id, capability, config=None):
+        validate_capability_name(capability)
+        await self.ensure_tables()
+        now = _now()
+        await self.db.execute_write(
+            """
+            INSERT INTO app_capability_grants (
+                app_id, capability, config, created_at, updated_at
+            )
+            VALUES (:app_id, :capability, :config, :now, :now)
+            ON CONFLICT(app_id, capability) DO UPDATE SET
+                config = excluded.config,
+                updated_at = excluded.updated_at
+            """,
+            {
+                "app_id": app_id,
+                "capability": capability,
+                "config": json.dumps(config or {}, sort_keys=True),
+                "now": now,
+            },
+        )

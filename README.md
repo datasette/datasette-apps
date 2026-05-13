@@ -43,6 +43,8 @@ The create page includes a copyable prompt for an LLM. The prompt explains the s
 
 The create and edit pages use Datasette's existing bundled CodeMirror editor for the HTML source textarea.
 
+Other plugins can expose server-backed capabilities to stored HTML apps by implementing `register_app_capabilities(datasette)` and returning `AppCapability` objects. Non-built-in capability grants are stored with raw JSON configuration in phase one.
+
 Plugins can add their own apps to the central catalog during startup:
 
 ```python

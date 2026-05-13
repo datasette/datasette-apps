@@ -5,6 +5,9 @@ import json
 
 from datasette import Forbidden, NotFound, Response
 
+from datasette.utils import await_me_maybe
+
+from .capabilities import get_app_capabilities
 from .csp import build_csp
 from .data_access import AppQueryError, run_app_query
 from .permissions import AppResource, AppsResource
@@ -239,10 +242,38 @@ async def capability_request(datasette, request):
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     if capability != "datasette.query":
-        return Response.json(
-            {"ok": False, "error": f"Unknown capability: {capability}"},
-            status=404,
-        )
+        try:
+            body = json.loads((await request.post_body()).decode("utf-8") or "{}")
+        except json.JSONDecodeError as e:
+            return Response.json({"ok": False, "error": f"Invalid request: {e}"})
+        capabilities = await get_app_capabilities(datasette)
+        descriptor = capabilities.get(capability)
+        if descriptor is None or descriptor.handler is None:
+            return Response.json(
+                {"ok": False, "error": f"Unknown capability: {capability}"},
+                status=404,
+            )
+        grant = await registry.get_capability_grant(app_id, capability)
+        if grant is None and not descriptor.default_enabled:
+            return Response.json(
+                {"ok": False, "error": f"Capability is not enabled: {capability}"}
+            )
+        config = grant["config"] if grant else {}
+        try:
+            result = await await_me_maybe(
+                descriptor.handler(
+                    datasette=datasette,
+                    request=request,
+                    app=app,
+                    actor=actor,
+                    input=body,
+                    config=config,
+                )
+            )
+            return Response.json({"ok": True, "result": result})
+        except Exception as e:
+            return Response.json({"ok": False, "error": str(e)})
+
     try:
         body = json.loads((await request.post_body()).decode("utf-8") or "{}")
         result = await run_app_query(
