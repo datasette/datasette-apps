@@ -33,7 +33,7 @@ Signed-in users get an "Apps" link in Datasette's top-right menu.
 
 HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and store every edit as a new row in `app_versions`.
 
-Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` origins configured, those same origins are allowed for remote images, and localhost origins are never allowed. Local file previews using `data:` and `blob:` image URLs are allowed.
+Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` origins configured, those same origins are allowed for remote images and external script tags, and localhost origins are never allowed. Local file previews using `data:` and `blob:` image URLs are allowed.
 
 The iframe bridge reports JavaScript errors, unhandled promise rejections, CSP violations, failed resources, fetch failures, `console.error()` calls, and failed Datasette capability requests back to the parent page. The app page shows these in a small expandable error panel above the iframe.
 
