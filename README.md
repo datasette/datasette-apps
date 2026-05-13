@@ -15,7 +15,19 @@ datasette install datasette-apps
 ```
 ## Usage
 
-Usage instructions go here.
+This plugin introduces a new interface at `/-/apps` for searching browsing available apps.
+
+There are two types of app:
+
+- HTML and JavaScript apps that are managed by this plugin, which run in a sandbox to prevent them from damaging or stealing your data (if they are buggy or malicious)
+- Apps provided by other plugins that are written in Python and HTML/JavaScript which are unrestricted but can do more things
+
+This plugin allows you to create and modify HTML apps, and provides a plugin hook to enable other plugins to add their own Python apps to the system.
+
+- `/-/apps` lets you browse available apps
+- `/-/apps/ULID` to interact with a full screen HTML app
+- `/-/apps/create` for creating a new app
+- `/-/apps/ULID/edit` to edit an existing app
 
 ## Development
 
