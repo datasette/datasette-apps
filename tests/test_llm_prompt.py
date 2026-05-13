@@ -49,6 +49,8 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
         "External stylesheet links and style elements are allowed from those same exact https:// origins"
         in response.text
     )
+    assert "history.replaceState()" in response.text
+    assert "history.pushState()" in response.text
     assert "Database: content" in response.text
     assert "table: news" in response.text
     assert "title TEXT" in response.text

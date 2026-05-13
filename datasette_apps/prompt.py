@@ -73,6 +73,7 @@ Important limitations:
 - Remote images are allowed from those same exact https:// origins. Local file previews using data: and blob: image URLs are allowed.
 - External script tags are allowed from those same exact https:// origins.
 - External stylesheet links and style elements are allowed from those same exact https:// origins.
+- history.replaceState(), history.pushState(), history.back(), history.forward(), and history.go() are no-ops in the sandbox.
 - CORS still applies even when an origin is granted.
 - datasette.executeQuery() is not available.
 

@@ -85,6 +85,15 @@ def test_iframe_bridge_reports_app_errors_to_parent():
     assert "window.fetch" in script
 
 
+def test_iframe_bridge_noops_history_mutation_methods():
+    script = iframe_bridge_script()
+
+    assert "shimHistoryMethod" in script
+    assert "Object.defineProperty(window.history, name" in script
+    for method in ("replaceState", "pushState", "back", "forward", "go"):
+        assert f'"{method}"' in script
+
+
 def test_parent_bridge_renders_app_error_panel():
     script = parent_bridge_script("app1")
 

@@ -18,6 +18,37 @@ def iframe_bridge_script():
   var nextId = 1;
   var pending = new Map();
 
+  function noopHistoryMethod() {
+  }
+
+  function shimHistoryMethod(name) {
+    try {
+      Object.defineProperty(window.history, name, {
+        value: noopHistoryMethod,
+        configurable: true,
+        writable: true
+      });
+    } catch (ignore) {
+      try {
+        window.history[name] = noopHistoryMethod;
+      } catch (ignoreAssignment) {
+      }
+    }
+
+    try {
+      if (window.History && window.History.prototype) {
+        Object.defineProperty(window.History.prototype, name, {
+          value: noopHistoryMethod,
+          configurable: true,
+          writable: true
+        });
+      }
+    } catch (ignorePrototype) {
+    }
+  }
+
+  ["replaceState", "pushState", "back", "forward", "go"].forEach(shimHistoryMethod);
+
   function valueToString(value) {
     if (value === null || value === undefined) {
       return "";
