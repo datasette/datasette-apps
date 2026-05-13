@@ -89,6 +89,10 @@ async def run_app_query(datasette, app, actor, database_name, sql, params=None):
                 if table_columns is not None or ("table", table) in allowed:
                     if _columns_allowed(table_columns, column):
                         return sqlite3.SQLITE_OK
+                direct_view_columns = allowed.get(("view", table))
+                if direct_view_columns is not None or ("view", table) in allowed:
+                    if _columns_allowed(direct_view_columns, column):
+                        return sqlite3.SQLITE_OK
                 if source:
                     view_columns = allowed.get(("view", source))
                     if view_columns is not None or ("view", source) in allowed:

@@ -16,6 +16,7 @@ def create_database(tmp_path):
         insert into news (title) values ('First'), ('Second');
         create table private_notes (id integer primary key, body text);
         insert into private_notes (body) values ('Secret');
+        create view recent_news as select title from news;
         """
     )
     conn.close()
@@ -131,3 +132,79 @@ async def test_datasette_query_capability_intersects_actor_permissions(tmp_path)
     assert response.status_code == 200
     assert response.json()["ok"] is False
     assert "actor" in response.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_datasette_query_capability_enforces_column_grants(tmp_path):
+    datasette = Datasette([str(create_database(tmp_path))])
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="News app",
+        description="",
+        html="",
+    )
+    await registry.set_data_permissions(
+        app["id"],
+        [
+            {
+                "database_name": "content",
+                "resource_type": "table",
+                "resource_name": "news",
+                "columns": ["title"],
+            }
+        ],
+    )
+
+    allowed = await datasette.client.post(
+        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        actor={"id": "alice"},
+        json={"database": "content", "sql": "select title from news"},
+    )
+    assert allowed.json()["ok"] is True
+
+    denied = await datasette.client.post(
+        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        actor={"id": "alice"},
+        json={"database": "content", "sql": "select id from news"},
+    )
+    assert denied.json()["ok"] is False
+    assert "not allowed" in denied.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_datasette_query_capability_allows_granted_views(tmp_path):
+    datasette = Datasette([str(create_database(tmp_path))])
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="View app",
+        description="",
+        html="",
+    )
+    await registry.set_data_permissions(
+        app["id"],
+        [
+            {
+                "database_name": "content",
+                "resource_type": "view",
+                "resource_name": "recent_news",
+                "columns": None,
+            }
+        ],
+    )
+
+    allowed = await datasette.client.post(
+        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        actor={"id": "alice"},
+        json={"database": "content", "sql": "select title from recent_news"},
+    )
+    assert allowed.json()["ok"] is True
+    assert allowed.json()["result"]["rows"] == [{"title": "First"}, {"title": "Second"}]
+
+    denied = await datasette.client.post(
+        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        actor={"id": "alice"},
+        json={"database": "content", "sql": "select title from news"},
+    )
+    assert denied.json()["ok"] is False
