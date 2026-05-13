@@ -20,6 +20,7 @@ def test_build_csp_includes_exact_connect_origins():
         "default-src 'none'; script-src 'unsafe-inline'; "
         "style-src 'unsafe-inline'; "
         "script-src-elem 'unsafe-inline' https://api.github.com; "
+        "style-src-elem 'unsafe-inline' https://api.github.com; "
         "img-src data: blob: https://api.github.com; "
         "connect-src https://api.github.com;"
     )

@@ -56,8 +56,9 @@ def build_csp(connect_origins):
     origins = [normalize_connect_origin(origin) for origin in connect_origins]
     directives = [*BASE_DIRECTIVES]
     if origins:
-        script_sources = ["'unsafe-inline'", *origins]
-        directives.append(f"script-src-elem {' '.join(script_sources)}")
+        element_sources = ["'unsafe-inline'", *origins]
+        directives.append(f"script-src-elem {' '.join(element_sources)}")
+        directives.append(f"style-src-elem {' '.join(element_sources)}")
     directives.append(f"img-src {' '.join(['data:', 'blob:', *origins])}")
     if origins:
         directives.append(f"connect-src {' '.join(origins)}")

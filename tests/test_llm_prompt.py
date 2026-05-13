@@ -44,6 +44,7 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     assert "databases enabled for this app" in response.text
     assert "Content Security Policy" in response.text
     assert "External script tags are allowed from those same exact https:// origins" in response.text
+    assert "External stylesheet links and style elements are allowed from those same exact https:// origins" in response.text
     assert "Database: content" in response.text
     assert "table: news" in response.text
     assert "title TEXT" in response.text
