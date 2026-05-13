@@ -5,6 +5,7 @@ import json
 from urllib.parse import urlencode
 
 from datasette import Forbidden, NotFound, Response
+from datasette.resources import DatabaseResource
 
 from datasette.utils import await_me_maybe
 
@@ -61,6 +62,20 @@ def _app_link(app):
     if app["external"]:
         return f"/-/apps/{app['id']}/launch"
     return app["path"]
+
+
+async def _visible_database_names(datasette, actor):
+    names = []
+    for database_name in datasette.databases:
+        if database_name == "_internal":
+            continue
+        if await datasette.allowed(
+            action="view-database",
+            resource=DatabaseResource(database=database_name),
+            actor=actor,
+        ):
+            names.append(database_name)
+    return names
 
 
 async def _redirect_after_pin(request):
@@ -135,7 +150,7 @@ async def create_app(datasette, request):
             )
         )
 
-    post = await request.post_vars()
+    post = await request.form()
     app = await Registry(datasette).create_stored_app(
         actor_id=_actor_id(actor),
         name=post.get("name") or "Untitled app",
@@ -186,9 +201,11 @@ async def edit_app(datasette, request):
     if request.method == "GET":
         version = await registry.get_current_version(app_id)
         access_mode = await registry.get_access_mode(app_id)
-        data_permissions = json.dumps(
-            await registry.get_data_permissions(app_id), indent=2
-        )
+        sql_databases = set(await registry.get_sql_databases(app_id))
+        sql_database_options = [
+            {"name": database_name, "selected": database_name in sql_databases}
+            for database_name in await _visible_database_names(datasette, actor)
+        ]
         csp_origins = "\n".join(await registry.get_csp_origins(app_id))
         capability_grants = json.dumps(
             await registry.get_capability_grants(app_id), indent=2
@@ -202,7 +219,7 @@ async def edit_app(datasette, request):
                     "html_source": version["html"],
                     "access_mode": access_mode,
                     "actor_ids": actor_ids,
-                    "data_permissions": data_permissions,
+                    "sql_database_options": sql_database_options,
                     "csp_origins": csp_origins,
                     "capability_grants": capability_grants,
                     "codemirror_assets": _codemirror_assets(),
@@ -211,7 +228,7 @@ async def edit_app(datasette, request):
             )
         )
 
-    post = await request.post_vars()
+    post = await request.form()
     await registry.update_stored_app(
         app_id,
         post.get("name") or app["name"],
@@ -227,10 +244,14 @@ async def edit_app(datasette, request):
         await registry.set_access_mode(
             app_id, post.get("access_mode") or "private", actor_ids=actor_ids
         )
-    if "data_permissions" in post:
-        await registry.set_data_permissions(
-            app_id, json.loads(post.get("data_permissions") or "[]")
-        )
+    if "sql_databases_present" in post:
+        visible_database_names = set(await _visible_database_names(datasette, actor))
+        sql_databases = [
+            database_name
+            for database_name in post.getlist("sql_databases")
+            if database_name in visible_database_names
+        ]
+        await registry.set_sql_databases(app_id, sql_databases)
     if "csp_origins" in post:
         await registry.set_csp_origins(
             app_id,

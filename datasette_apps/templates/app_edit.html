@@ -39,8 +39,23 @@
 
   <h2>Data access</h2>
   <div class="datasette-app-form-row">
-    <label for="app-data-permissions">Read-only table/view grants JSON</label>
-    <textarea id="app-data-permissions" name="data_permissions" rows="8">{{ data_permissions }}</textarea>
+    <fieldset class="datasette-app-checkbox-group">
+      <legend>SQL query databases</legend>
+      <input type="hidden" name="sql_databases_present" value="1">
+      {% for database in sql_database_options %}
+        <label>
+          <input
+            type="checkbox"
+            name="sql_databases"
+            value="{{ database.name }}"
+            {% if database.selected %}checked{% endif %}
+          >
+          {{ database.name }}
+        </label>
+      {% else %}
+        <p>No databases are visible to you.</p>
+      {% endfor %}
+    </fieldset>
   </div>
 
   <h2>Network access</h2>

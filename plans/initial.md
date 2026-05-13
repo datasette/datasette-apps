@@ -104,23 +104,16 @@ CREATE TABLE IF NOT EXISTS app_access (
 CREATE INDEX IF NOT EXISTS idx_app_access_lookup
     ON app_access(action, app_id, subject_type, subject_id);
 
-CREATE TABLE IF NOT EXISTS app_data_permissions (
-    id INTEGER PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS app_sql_databases (
     app_id TEXT NOT NULL REFERENCES apps(id),
-    permission_type TEXT NOT NULL,
     database_name TEXT NOT NULL,
-    resource_type TEXT NOT NULL DEFAULT 'table',
-    resource_name TEXT NOT NULL,
-    columns TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    CHECK (permission_type IN ('table-read')),
-    CHECK (resource_type IN ('table', 'view')),
-    UNIQUE (app_id, permission_type, database_name, resource_type, resource_name)
+    PRIMARY KEY (app_id, database_name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_app_data_permissions_app
-    ON app_data_permissions(app_id, permission_type, database_name, resource_type);
+CREATE INDEX IF NOT EXISTS idx_app_sql_databases_app
+    ON app_sql_databases(app_id, database_name);
 
 CREATE TABLE IF NOT EXISTS app_csp_origins (
     id INTEGER PRIMARY KEY,
@@ -237,43 +230,21 @@ Do not let stored app HTML call Datasette's generic query JSON API directly. The
 Every app data request should check all of:
 
 - the current actor can `view-app` for that app, and
-- the app's own data permissions allow the requested operation, and
-- the current actor's normal Datasette permissions allow the same underlying database/table/view access.
+- the app's own SQL database allow-list includes the requested database.
 
-Phase-one permission types:
+The actual SQL execution should be delegated to Datasette's own read-only query JSON API as the current actor. That means Datasette enforces `execute-sql`, SQL validation, query time limits, row truncation, and any other normal query behavior.
 
-- `table-read`: allows read-only SQL to read a specific table or view, optionally restricted to a JSON list of columns in `columns`.
+Phase-one data access:
 
-Examples:
+- `sql-database`: allows `datasette.query()` to send read-only SQL to one named Datasette database.
 
-- An app allowed read-only access to `stats` and `news` gets two `table-read` rows.
-- An app allowed to run read SQL against `news` and `authors` gets two `table-read` rows. If the viewing actor can normally read `news` but not `authors`, that actor's app query must still be denied or reduced so it cannot read `authors`.
+Example:
 
-Read-only SQL should be enforced with a SQLite authorizer callback:
+- An app allowed to query `_memory` and `content` gets two `app_sql_databases` rows. If the viewing actor can normally execute SQL against `content` but not `_memory`, Datasette's query API denies `_memory`.
 
-- Install the authorizer only around the specific `datasette.query` execution and always clear it in `finally`.
-- Deny all write actions (`INSERT`, `UPDATE`, `DELETE`, schema changes, `ATTACH`, etc.).
-- Allow `READ` only for granted tables/views and granted columns, intersected with the viewing actor's own Datasette permissions.
-- Allow view grants as first-class grants. If SQLite reports underlying table reads for a granted view, allow those reads only while evaluating that view; direct reads of the same underlying tables still require their own grants.
-- Deny access to non-granted tables/views even when they appear through joins, subqueries, triggers, views, or expressions.
-- Deny or tightly whitelist PRAGMA, functions, and extension-related operations.
-- Keep Datasette's existing SQL time limits and row truncation behavior.
+The Data access UI should list databases visible to the editing actor as checkbox options. Users can select none, one, or more databases.
 
 `datasette.executeQuery()` and canned write-query execution are deliberately not in day one. The schema and capability design should leave an obvious later path for a `canned-query-execute` permission type, but the first implementation only exposes `datasette.query()`.
-
-The data access UI needs to be extremely explicit. A user editing an app should be able to see and modify a concise matrix like:
-
-```text
-Data access
-
-Read-only SQL:
-  database     resource type     resource     columns
-  main         table             stats        all
-  main         table             news         title, body, published
-  main         view              recent_news  all
-```
-
-Avoid vague labels such as "database access". The UI should say exactly which tables and views can be read, and which columns are included.
 
 ## App capabilities
 
@@ -286,7 +257,7 @@ This is different from external app registration:
 
 Built-in examples:
 
-- `datasette.query`: read-only SQL, backed by `app_data_permissions`.
+- `datasette.query`: read-only SQL, backed by the app's SQL database allow-list and Datasette's query JSON API.
 
 Possible plugin examples:
 
@@ -468,7 +439,7 @@ The prompt should explain:
 - External `fetch()` requests only work for exact origins explicitly granted in the app's network access settings, and CORS still applies.
 - Database access must use the injected `datasette.query(database, sql, params?)` helper.
 - `datasette.query()` can only run read-only SQL.
-- Query access is limited to the intersection of the current actor's Datasette permissions and the app's table/view/column grants.
+- Query access is limited to databases enabled for the app, plus the current actor's normal Datasette SQL permissions.
 - `datasette.executeQuery()` is not available in phase one.
 - Plugin-defined capabilities, if enabled for the app, are requested with `datasette.request(capabilityName, input)`.
 
@@ -690,10 +661,9 @@ tests/
    - `create-app`, `view-app`, `edit-app`, `manage-app-access`
    - `permission_resources_sql()` rows for owner defaults and app access UI rows
 6. Add app data access enforcement:
-   - `app_data_permissions` helpers
-   - SQLite authorizer for read-only SQL
-   - actor permission intersection checks
-   - clear edit UI for table/view/column read access
+   - `app_sql_databases` helpers
+   - delegate read-only SQL to Datasette's query JSON API
+   - clear edit UI for selecting allowed databases
 7. Add per-app network access controls:
    - `app_csp_origins` helpers
    - CSP builder that includes exact `connect-src` origins

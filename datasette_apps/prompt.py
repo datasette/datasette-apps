@@ -76,7 +76,8 @@ Important limitations:
 Use this API for data access:
 - await datasette.query(database, sql, params?)
 - The SQL must be read-only.
-- Query access is limited to the intersection of this actor's Datasette permissions and the app's table/view/column grants.
+- Query access is limited to databases enabled for this app and this actor's normal Datasette SQL permissions.
+- If a database is not selected in the app's Data access settings, datasette.query() cannot query it.
 - The returned value has this shape: {{columns: [...], rows: [{{...}}, ...]}}.
 
 Plugin capabilities, if enabled for this app, are requested with:

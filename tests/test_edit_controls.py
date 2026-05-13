@@ -25,12 +25,15 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'textarea id="app-description" name="description"' in response.text
     assert "App access" in response.text
     assert "Data access" in response.text
+    assert "SQL query databases" in response.text
+    assert 'name="sql_databases"' in response.text
+    assert 'value="_memory"' in response.text
     assert "Network access" in response.text
     assert "Capabilities" in response.text
 
 
 @pytest.mark.asyncio
-async def test_edit_form_saves_data_csp_and_capability_grants():
+async def test_edit_form_saves_sql_database_csp_and_capability_grants():
     datasette = Datasette(memory=True)
     registry = Registry(datasette)
     app = await registry.create_stored_app(
@@ -48,23 +51,15 @@ async def test_edit_form_saves_data_csp_and_capability_grants():
             "description": "",
             "html": "",
             "access_mode": "private",
-            "data_permissions": json.dumps(
-                [
-                    {
-                        "database_name": "content",
-                        "resource_type": "table",
-                        "resource_name": "news",
-                        "columns": ["title"],
-                    }
-                ]
-            ),
+            "sql_databases_present": "1",
+            "sql_databases": "_memory",
             "csp_origins": "https://api.github.com\n",
             "capability_grants": json.dumps({"test.echo": {"mode": "friendly"}}),
         },
     )
 
     assert response.status_code == 302
-    assert (await registry.get_data_permissions(app["id"]))[0]["columns"] == ["title"]
+    assert await registry.get_sql_databases(app["id"]) == ["_memory"]
     assert await registry.get_csp_origins(app["id"]) == ["https://api.github.com"]
     assert (await registry.get_capability_grant(app["id"], "test.echo"))["config"] == {
         "mode": "friendly"
@@ -89,7 +84,7 @@ async def test_edit_form_signed_in_access_mode_allows_other_actor():
             "description": "",
             "html": "<h1>Shared</h1>",
             "access_mode": "signed-in",
-            "data_permissions": "[]",
+            "sql_databases_present": "1",
             "csp_origins": "",
             "capability_grants": "{}",
         },
@@ -118,7 +113,7 @@ async def test_edit_form_specific_users_access_mode():
             "html": "<h1>Team</h1>",
             "access_mode": "specific",
             "actor_ids": "bob\ncarol",
-            "data_permissions": "[]",
+            "sql_databases_present": "1",
             "csp_origins": "",
             "capability_grants": "{}",
         },

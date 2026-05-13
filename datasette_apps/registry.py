@@ -40,14 +40,6 @@ def _row_to_version(row):
     return dict(row)
 
 
-def _row_to_data_permission(row):
-    if row is None:
-        return None
-    permission = dict(row)
-    permission["columns"] = _decode_json(permission["columns"], None)
-    return permission
-
-
 def _fts_query(q):
     tokens = re.findall(r"[\w]+", q or "")
     if not tokens:
@@ -407,51 +399,34 @@ class Registry:
 
         await self.db.execute_write_fn(save)
 
-    async def get_data_permissions(self, app_id):
+    async def get_sql_databases(self, app_id):
         await self.ensure_tables()
         result = await self.db.execute(
             """
-            SELECT *
-            FROM app_data_permissions
+            SELECT database_name
+            FROM app_sql_databases
             WHERE app_id = :app_id
-            ORDER BY database_name, resource_type, resource_name
+            ORDER BY database_name
             """,
             {"app_id": app_id},
         )
-        return [_row_to_data_permission(row) for row in result.rows]
+        return [row["database_name"] for row in result.rows]
 
-    async def set_data_permissions(self, app_id, permissions):
+    async def set_sql_databases(self, app_id, database_names):
         await self.ensure_tables()
         now = _now()
-        rows = []
-        for permission in permissions:
-            columns = permission.get("columns")
-            rows.append(
-                (
-                    app_id,
-                    "table-read",
-                    permission["database_name"],
-                    permission.get("resource_type") or "table",
-                    permission["resource_name"],
-                    json.dumps(columns) if columns is not None else None,
-                    now,
-                    now,
-                )
-            )
+        database_names = sorted(dict.fromkeys(database_names))
 
         def save(conn):
-            conn.execute(
-                "DELETE FROM app_data_permissions WHERE app_id = ?", (app_id,)
-            )
+            conn.execute("DELETE FROM app_sql_databases WHERE app_id = ?", (app_id,))
             conn.executemany(
                 """
-                INSERT INTO app_data_permissions (
-                    app_id, permission_type, database_name, resource_type,
-                    resource_name, columns, created_at, updated_at
+                INSERT INTO app_sql_databases (
+                    app_id, database_name, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?)
                 """,
-                rows,
+                [(app_id, database_name, now, now) for database_name in database_names],
             )
 
         await self.db.execute_write_fn(save)

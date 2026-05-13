@@ -38,6 +38,7 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     assert "Copy prompt" in response.text
     assert "id=\"llm-prompt\"" in response.text
     assert "datasette.query(database, sql, params?)" in response.text
+    assert "databases enabled for this app" in response.text
     assert "Content Security Policy" in response.text
     assert "Database: content" in response.text
     assert "table: news" in response.text

@@ -88,6 +88,26 @@ async def test_registry_records_access_and_pins_apps():
 
 
 @pytest.mark.asyncio
+async def test_registry_stores_sql_database_allow_list():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="SQL app",
+        description="",
+        html="",
+    )
+
+    await registry.set_sql_databases(app["id"], ["_memory", "_memory", "content"])
+
+    assert await registry.get_sql_databases(app["id"]) == ["_memory", "content"]
+
+    await registry.set_sql_databases(app["id"], [])
+
+    assert await registry.get_sql_databases(app["id"]) == []
+
+
+@pytest.mark.asyncio
 async def test_registry_create_stored_app_and_save_versions():
     datasette = Datasette(memory=True)
     registry = Registry(datasette)

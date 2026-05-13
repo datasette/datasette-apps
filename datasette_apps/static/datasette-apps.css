@@ -49,6 +49,30 @@
   margin: 0 0 0.35rem;
 }
 
+.datasette-app-checkbox-group {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin: 0;
+  padding: 0.85rem 1rem 0.55rem;
+}
+
+.datasette-app-checkbox-group legend {
+  font-weight: 700;
+  padding: 0 0.25rem;
+}
+
+.datasette-app-checkbox-group label {
+  align-items: center;
+  display: flex;
+  font-weight: 400;
+  gap: 0.45rem;
+  margin: 0 0 0.45rem;
+}
+
+.datasette-app-checkbox-group input[type="checkbox"] {
+  margin: 0;
+}
+
 .datasette-app-form input[type="text"],
 .datasette-app-form select,
 .datasette-app-form textarea,

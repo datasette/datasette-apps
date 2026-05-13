@@ -64,23 +64,16 @@ CREATE TABLE IF NOT EXISTS app_access (
 CREATE INDEX IF NOT EXISTS idx_app_access_lookup
     ON app_access(action, app_id, subject_type, subject_id);
 
-CREATE TABLE IF NOT EXISTS app_data_permissions (
-    id INTEGER PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS app_sql_databases (
     app_id TEXT NOT NULL REFERENCES apps(id),
-    permission_type TEXT NOT NULL,
     database_name TEXT NOT NULL,
-    resource_type TEXT NOT NULL DEFAULT 'table',
-    resource_name TEXT NOT NULL,
-    columns TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    CHECK (permission_type IN ('table-read')),
-    CHECK (resource_type IN ('table', 'view')),
-    UNIQUE (app_id, permission_type, database_name, resource_type, resource_name)
+    PRIMARY KEY (app_id, database_name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_app_data_permissions_app
-    ON app_data_permissions(app_id, permission_type, database_name, resource_type);
+CREATE INDEX IF NOT EXISTS idx_app_sql_databases_app
+    ON app_sql_databases(app_id, database_name);
 
 CREATE TABLE IF NOT EXISTS app_csp_origins (
     id INTEGER PRIMARY KEY,

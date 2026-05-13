@@ -31,22 +31,12 @@ async def create_app_with_news_grant(datasette):
         description="",
         html="",
     )
-    await registry.set_data_permissions(
-        app["id"],
-        [
-            {
-                "database_name": "content",
-                "resource_type": "table",
-                "resource_name": "news",
-                "columns": None,
-            }
-        ],
-    )
+    await registry.set_sql_databases(app["id"], ["content"])
     return app
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_reads_granted_table(tmp_path):
+async def test_datasette_query_capability_reads_from_allowed_database(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))])
     app = await create_app_with_news_grant(datasette)
 
@@ -72,7 +62,9 @@ async def test_datasette_query_capability_reads_granted_table(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_denies_ungranted_table(tmp_path):
+async def test_datasette_query_capability_allows_other_tables_in_allowed_database(
+    tmp_path,
+):
     datasette = Datasette([str(create_database(tmp_path))])
     app = await create_app_with_news_grant(datasette)
 
@@ -83,6 +75,32 @@ async def test_datasette_query_capability_denies_ungranted_table(tmp_path):
             {
                 "database": "content",
                 "sql": "select body from private_notes",
+            }
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "result": {
+            "columns": ["body"],
+            "rows": [{"body": "Secret"}],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_datasette_query_capability_denies_unallowed_database(tmp_path):
+    datasette = Datasette([str(create_database(tmp_path))], memory=True)
+    app = await create_app_with_news_grant(datasette)
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        actor={"id": "alice"},
+        content=json.dumps(
+            {
+                "database": "_memory",
+                "sql": "select 1",
             }
         ),
     )
@@ -110,7 +128,7 @@ async def test_datasette_query_capability_denies_writes(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["ok"] is False
-    assert "not allowed" in response.json()["error"]
+    assert "SELECT" in response.json()["error"]
 
 
 @pytest.mark.asyncio
@@ -131,68 +149,34 @@ async def test_datasette_query_capability_intersects_actor_permissions(tmp_path)
 
     assert response.status_code == 200
     assert response.json()["ok"] is False
-    assert "actor" in response.json()["error"]
+    assert "Permission denied" in response.json()["error"]
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_enforces_column_grants(tmp_path):
+async def test_datasette_query_capability_accepts_named_parameters(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))])
-    registry = Registry(datasette)
-    app = await registry.create_stored_app(
-        actor_id="alice",
-        name="News app",
-        description="",
-        html="",
-    )
-    await registry.set_data_permissions(
-        app["id"],
-        [
-            {
-                "database_name": "content",
-                "resource_type": "table",
-                "resource_name": "news",
-                "columns": ["title"],
-            }
-        ],
-    )
+    app = await create_app_with_news_grant(datasette)
 
-    allowed = await datasette.client.post(
+    response = await datasette.client.post(
         f"/-/apps/{app['id']}/capabilities/datasette.query",
         actor={"id": "alice"},
-        json={"database": "content", "sql": "select title from news"},
+        json={
+            "database": "content",
+            "sql": "select title from news where id = :id",
+            "params": {"id": 2},
+        },
     )
-    assert allowed.json()["ok"] is True
-
-    denied = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
-        actor={"id": "alice"},
-        json={"database": "content", "sql": "select id from news"},
-    )
-    assert denied.json()["ok"] is False
-    assert "not allowed" in denied.json()["error"]
+    assert response.json()["ok"] is True
+    assert response.json()["result"] == {
+        "columns": ["title"],
+        "rows": [{"title": "Second"}],
+    }
 
 
 @pytest.mark.asyncio
 async def test_datasette_query_capability_allows_granted_views(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))])
-    registry = Registry(datasette)
-    app = await registry.create_stored_app(
-        actor_id="alice",
-        name="View app",
-        description="",
-        html="",
-    )
-    await registry.set_data_permissions(
-        app["id"],
-        [
-            {
-                "database_name": "content",
-                "resource_type": "view",
-                "resource_name": "recent_news",
-                "columns": None,
-            }
-        ],
-    )
+    app = await create_app_with_news_grant(datasette)
 
     allowed = await datasette.client.post(
         f"/-/apps/{app['id']}/capabilities/datasette.query",
@@ -201,10 +185,3 @@ async def test_datasette_query_capability_allows_granted_views(tmp_path):
     )
     assert allowed.json()["ok"] is True
     assert allowed.json()["result"]["rows"] == [{"title": "First"}, {"title": "Second"}]
-
-    denied = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
-        actor={"id": "alice"},
-        json={"database": "content", "sql": "select title from news"},
-    )
-    assert denied.json()["ok"] is False

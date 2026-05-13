@@ -35,7 +35,7 @@ HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and 
 
 Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` `connect-src` origins configured, and localhost origins are never allowed.
 
-Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped capability endpoint. Those queries are read-only and are limited to the intersection of the current actor's Datasette permissions and the app's own table/view/column grants.
+Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped capability endpoint. Apps have a simple SQL database allow-list configured on the edit page; if the requested database is allowed, the query is forwarded to Datasette's own read-only query JSON API using the current actor, so Datasette's normal SQL permissions still apply.
 
 The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can view, edit, and manage their own apps; external apps registered by plugins are visible to signed-in users by default.
 
@@ -49,7 +49,7 @@ The create and edit pages use Datasette's existing bundled CodeMirror editor for
 
 Other plugins can expose server-backed capabilities to stored HTML apps by implementing `register_app_capabilities(datasette)` and returning `AppCapability` objects. Non-built-in capability grants are stored with raw JSON configuration in phase one.
 
-The edit page includes explicit controls for app access (private, signed-in users, or specific actor IDs), read-only table/view grants, allowed network origins, and raw JSON capability grants.
+The edit page includes explicit controls for app access (private, signed-in users, or specific actor IDs), SQL query database access, allowed network origins, and raw JSON capability grants.
 
 Plugins can add their own apps to the central catalog during startup:
 
