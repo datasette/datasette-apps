@@ -375,7 +375,7 @@ default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-s
 With two allowed API origins:
 
 ```text
-default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src https://api.github.com https://api.inaturalist.org;
+default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https://api.github.com https://api.inaturalist.org; connect-src https://api.github.com https://api.inaturalist.org;
 ```
 
 Important browser behavior:
@@ -389,7 +389,7 @@ The app editing UI should show network access as an explicit list:
 ```text
 Network access
 
-Allowed fetch() origins:
+Allowed fetch() and image origins:
   https://api.github.com
   https://api.inaturalist.org
 ```
@@ -437,6 +437,7 @@ The prompt should explain:
 - Direct network access is disabled by default.
 - The app cannot fetch from Datasette, localhost, or arbitrary origins.
 - External `fetch()` requests only work for exact origins explicitly granted in the app's network access settings, and CORS still applies.
+- Remote images are allowed from those same origins. Local file previews using `data:` and `blob:` image URLs are allowed.
 - Database access must use the injected `datasette.query(database, sql, params?)` helper.
 - `datasette.query()` can only run read-only SQL.
 - Query access is limited to databases enabled for the app, plus the current actor's normal Datasette SQL permissions.
@@ -666,7 +667,7 @@ tests/
    - clear edit UI for selecting allowed databases
 7. Add per-app network access controls:
    - `app_csp_origins` helpers
-   - CSP builder that includes exact `connect-src` origins
+- CSP builder that includes exact origins in both `connect-src` and `img-src`
    - clear edit UI for allowed fetch origins
    - validation for exact `https://` origins
 8. Add plugin-defined app capabilities:

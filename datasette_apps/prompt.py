@@ -70,6 +70,7 @@ Important limitations:
 - Direct network access is disabled by default.
 - The app cannot fetch from Datasette, localhost, or arbitrary origins.
 - External fetch() requests only work for exact https:// origins explicitly granted in the app's network access settings.
+- Remote images are allowed from those same exact https:// origins. Local file previews using data: and blob: image URLs are allowed.
 - CORS still applies even when an origin is granted.
 - datasette.executeQuery() is not available.
 

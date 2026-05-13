@@ -33,7 +33,7 @@ Signed-in users get an "Apps" link in Datasette's top-right menu.
 
 HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and store every edit as a new row in `app_versions`.
 
-Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` `connect-src` origins configured, and localhost origins are never allowed.
+Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` origins configured, those same origins are allowed for remote images, and localhost origins are never allowed. Local file previews using `data:` and `blob:` image URLs are allowed.
 
 Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped capability endpoint. Apps have a simple SQL database allow-list configured on the edit page; if the requested database is allowed, the query is forwarded to Datasette's own read-only query JSON API using the current actor, so Datasette's normal SQL permissions still apply.
 

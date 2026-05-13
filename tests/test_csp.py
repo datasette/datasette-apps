@@ -14,7 +14,7 @@ def test_build_csp_defaults_to_no_connect_src():
 def test_build_csp_includes_exact_connect_origins():
     assert build_csp(["https://api.github.com"]) == (
         "default-src 'none'; script-src 'unsafe-inline'; "
-        "style-src 'unsafe-inline'; img-src data: blob:; "
+        "style-src 'unsafe-inline'; img-src data: blob: https://api.github.com; "
         "connect-src https://api.github.com;"
     )
 

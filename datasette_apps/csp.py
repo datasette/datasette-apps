@@ -4,12 +4,11 @@ import ipaddress
 from urllib.parse import urlsplit
 
 
-BASE_CSP = (
-    "default-src 'none'; "
-    "script-src 'unsafe-inline'; "
-    "style-src 'unsafe-inline'; "
-    "img-src data: blob:;"
-)
+BASE_DIRECTIVES = [
+    "default-src 'none'",
+    "script-src 'unsafe-inline'",
+    "style-src 'unsafe-inline'",
+]
 
 
 def _is_localhost(hostname):
@@ -55,6 +54,7 @@ def normalize_connect_origin(origin):
 
 def build_csp(connect_origins):
     origins = [normalize_connect_origin(origin) for origin in connect_origins]
-    if not origins:
-        return BASE_CSP
-    return f"{BASE_CSP} connect-src {' '.join(origins)};"
+    directives = [*BASE_DIRECTIVES, f"img-src {' '.join(['data:', 'blob:', *origins])}"]
+    if origins:
+        directives.append(f"connect-src {' '.join(origins)}")
+    return "; ".join(directives) + ";"
