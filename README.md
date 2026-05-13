@@ -39,7 +39,7 @@ Stored apps can query Datasette data using the injected `datasette.query(databas
 
 The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can view, edit, and manage their own apps; external apps registered by plugins are visible to signed-in users by default.
 
-Signed-in users can pin apps from the catalog. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
+Signed-in users can pin apps from the catalog and from individual stored app pages. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
 
 The `/-/apps` catalog is searchable and paginated, using a `next` cursor in the URL for subsequent pages.
 

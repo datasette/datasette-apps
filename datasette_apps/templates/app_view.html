@@ -3,9 +3,22 @@
 {% block title %}{{ app.name }}{% endblock %}
 
 {% block content %}
-<h1>{{ app.name }}</h1>
+<div class="datasette-app-view-header">
+  <h1>{{ app.name }}</h1>
+  <div class="datasette-app-actions">
+    <a href="/-/apps/{{ app.id }}/edit">Edit app</a>
+    <form class="datasette-app-pin-form" method="post" action="/-/apps/{{ app.id }}/{% if pinned %}unpin{% else %}pin{% endif %}">
+      <input type="hidden" name="next" value="{{ current_path }}">
+      <button
+        class="datasette-app-pin-button"
+        type="submit"
+        aria-pressed="{% if pinned %}true{% else %}false{% endif %}"
+        aria-label="{% if pinned %}Unpin{% else %}Pin{% endif %} {{ app.name }}"
+      >{% if pinned %}Unpin{% else %}Pin{% endif %}</button>
+    </form>
+  </div>
+</div>
 
-<p><a href="/-/apps/{{ app.id }}/edit">Edit app</a></p>
 <iframe
   id="datasette-app-frame"
   sandbox="allow-scripts"

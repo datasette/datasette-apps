@@ -1,0 +1,127 @@
+.datasette-apps-page-header,
+.datasette-app-view-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.datasette-apps-page-header h1,
+.datasette-app-view-header h1 {
+  margin-top: 0;
+}
+
+.datasette-apps-page-header p {
+  margin-top: 0.25rem;
+}
+
+.datasette-app-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.datasette-apps-search {
+  margin: 0 0 1rem;
+}
+
+.datasette-app-list {
+  list-style: none;
+  margin: 1rem 0;
+  padding: 0;
+}
+
+.datasette-app-list-item {
+  align-items: flex-start;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0 0 0.75rem;
+  padding: 0.8rem;
+}
+
+.datasette-app-list-item-pinned {
+  border-color: #bbb;
+}
+
+.datasette-app-list-main h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.25rem;
+}
+
+.datasette-app-list-main p {
+  margin: 0;
+}
+
+.datasette-app-pin-form {
+  margin: 0;
+}
+
+.datasette-app-pin-button {
+  background: #fff;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  color: #333;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 0.4rem 0.7rem;
+}
+
+.datasette-app-pin-button:hover,
+.datasette-app-pin-button:focus {
+  border-color: #276890;
+  color: #276890;
+}
+
+.datasette-app-pin-button[aria-pressed="true"] {
+  background: #f4f4f4;
+  border-color: #777;
+  font-weight: 600;
+}
+
+.datasette-apps-homepage {
+  margin: 0 0 1.5rem;
+}
+
+.datasette-app-card-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.datasette-app-card {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.8rem;
+}
+
+.datasette-app-card h3 {
+  font-size: 1.05rem;
+  margin: 0 0 0.35rem;
+}
+
+.datasette-app-card p {
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .datasette-apps-page-header,
+  .datasette-app-view-header,
+  .datasette-app-list-item {
+    display: block;
+  }
+
+  .datasette-app-actions,
+  .datasette-app-pin-form {
+    margin-top: 0.75rem;
+  }
+
+  .datasette-app-card-grid {
+    grid-template-columns: 1fr;
+  }
+}

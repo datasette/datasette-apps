@@ -63,6 +63,11 @@ def top_homepage(datasette, request):
 
 
 @hookimpl
+def extra_css_urls():
+    return ["/-/static-plugins/datasette-apps/datasette-apps.css"]
+
+
+@hookimpl
 def menu_links(datasette, actor, request):
     if not actor:
         return []

@@ -63,6 +63,15 @@ def _app_link(app):
     return app["path"]
 
 
+async def _redirect_after_pin(request):
+    if request.method == "POST":
+        post = await request.post_vars()
+        next_url = post.get("next")
+        if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+            return Response.redirect(next_url)
+    return Response.redirect("/-/apps")
+
+
 async def apps_index(datasette, request):
     actor = _require_actor(request)
     registry = Registry(datasette)
@@ -84,6 +93,7 @@ async def apps_index(datasette, request):
             continue
         app = dict(app)
         app["href"] = _app_link(app)
+        app["pinned"] = bool(app.get("pinned_at"))
         visible_apps.append(app)
     next_url = None
     if has_next:
@@ -99,6 +109,7 @@ async def apps_index(datasette, request):
                 "apps": visible_apps,
                 "q": request.args.get("q"),
                 "next_url": next_url,
+                "current_path": request.full_path,
             },
             request=request,
         )
@@ -143,7 +154,9 @@ async def view_app(datasette, request):
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     version = await registry.get_current_version(app_id)
-    await registry.record_access(_actor_id(actor), app_id)
+    actor_id = _actor_id(actor)
+    await registry.record_access(actor_id, app_id)
+    state = await registry.get_user_state(actor_id, app_id)
     csp = build_csp(await registry.get_csp_origins(app_id))
     srcdoc = build_app_srcdoc(version["html"], csp, iframe_bridge_script())
     return Response.html(
@@ -154,6 +167,8 @@ async def view_app(datasette, request):
                 "csp": csp,
                 "srcdoc": srcdoc,
                 "parent_bridge": parent_bridge_script(app_id),
+                "pinned": bool(state and state["pinned_at"]),
+                "current_path": request.path,
             },
             request=request,
         )
@@ -252,7 +267,7 @@ async def pin_app(datasette, request):
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     await registry.set_pinned(_actor_id(actor), app_id, True)
-    return Response.redirect("/-/apps")
+    return await _redirect_after_pin(request)
 
 
 async def unpin_app(datasette, request):
@@ -263,7 +278,7 @@ async def unpin_app(datasette, request):
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     await registry.set_pinned(_actor_id(actor), app_id, False)
-    return Response.redirect("/-/apps")
+    return await _redirect_after_pin(request)
 
 
 async def capability_request(datasette, request):

@@ -23,14 +23,24 @@ async def test_pin_routes_and_catalog_order():
         source="plugin",
     )
 
+    index = await datasette.client.get("/-/apps", actor={"id": "alice"})
+    assert index.status_code == 200
+    assert 'action="/-/apps/plugin:second/pin"' in index.text
+    assert 'aria-label="Pin Second app"' in index.text
+
     response = await datasette.client.post(
-        "/-/apps/plugin:second/pin", actor={"id": "alice"}
+        "/-/apps/plugin:second/pin",
+        actor={"id": "alice"},
+        data={"next": "/-/apps?q=app"},
     )
     assert response.status_code == 302
+    assert response.headers["location"] == "/-/apps?q=app"
 
     index = await datasette.client.get("/-/apps", actor={"id": "alice"})
     assert index.status_code == 200
     assert index.text.index("Second app") < index.text.index("First app")
+    assert 'action="/-/apps/plugin:second/unpin"' in index.text
+    assert 'aria-label="Unpin Second app"' in index.text
 
     await datasette.client.post("/-/apps/plugin:second/unpin", actor={"id": "alice"})
     state = await registry.get_user_state("alice", "plugin:second")
@@ -60,3 +70,33 @@ async def test_homepage_shows_three_recent_pinned_apps():
     assert "App 2" in response.text
     assert "App 1" in response.text
     assert "App 0" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_stored_app_view_includes_pin_controls():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Pinned tool",
+        description="Can be pinned from its app page",
+        html="<!DOCTYPE html><title>Pinned tool</title>",
+    )
+
+    view = await datasette.client.get(app["path"], actor={"id": "alice"})
+    assert view.status_code == 200
+    assert f'action="/-/apps/{app["id"]}/pin"' in view.text
+    assert 'aria-label="Pin Pinned tool"' in view.text
+
+    response = await datasette.client.post(
+        f'/-/apps/{app["id"]}/pin',
+        actor={"id": "alice"},
+        data={"next": app["path"]},
+    )
+    assert response.status_code == 302
+    assert response.headers["location"] == app["path"]
+
+    view = await datasette.client.get(app["path"], actor={"id": "alice"})
+    assert view.status_code == 200
+    assert f'action="/-/apps/{app["id"]}/unpin"' in view.text
+    assert 'aria-label="Unpin Pinned tool"' in view.text

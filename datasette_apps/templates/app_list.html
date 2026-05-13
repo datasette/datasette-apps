@@ -3,20 +3,34 @@
 {% block title %}Apps{% endblock %}
 
 {% block content %}
-<h1>Apps</h1>
+<div class="datasette-apps-page-header">
+  <h1>Apps</h1>
+  <p><a href="/-/apps/create">Create app</a></p>
+</div>
 
-<p><a href="/-/apps/create">Create app</a></p>
-
-<form method="get" action="/-/apps">
+<form class="datasette-apps-search" method="get" action="/-/apps">
   <input type="search" name="q" placeholder="Search apps" value="{{ q or '' }}">
   <button type="submit">Search</button>
 </form>
 
-<ul>
+<ul class="datasette-app-list">
 {% for app in apps %}
-  <li>
-    <a href="{{ app.href }}">{{ app.name }}</a>
-    <p>{{ app.description }}</p>
+  <li class="datasette-app-list-item{% if app.pinned %} datasette-app-list-item-pinned{% endif %}">
+    <div class="datasette-app-list-main">
+      <h2><a href="{{ app.href }}">{{ app.name }}</a></h2>
+      {% if app.description %}
+        <p>{{ app.description }}</p>
+      {% endif %}
+    </div>
+    <form class="datasette-app-pin-form" method="post" action="/-/apps/{{ app.id }}/{% if app.pinned %}unpin{% else %}pin{% endif %}">
+      <input type="hidden" name="next" value="{{ current_path }}">
+      <button
+        class="datasette-app-pin-button"
+        type="submit"
+        aria-pressed="{% if app.pinned %}true{% else %}false{% endif %}"
+        aria-label="{% if app.pinned %}Unpin{% else %}Pin{% endif %} {{ app.name }}"
+      >{% if app.pinned %}Unpin{% else %}Pin{% endif %}</button>
+    </form>
   </li>
 {% endfor %}
 </ul>

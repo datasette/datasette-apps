@@ -253,9 +253,14 @@ class Registry:
         await self.ensure_tables()
         fts = _fts_query(q)
         join_user_state = ""
+        select_user_state = ""
         order_by = "apps.updated_at DESC, apps.id"
         params = {"limit": limit, "offset": offset}
         if actor_id:
+            select_user_state = """
+                , app_user_state.pinned_at AS pinned_at
+                , app_user_state.last_accessed_at AS last_accessed_at
+            """
             join_user_state = """
                 LEFT JOIN app_user_state
                     ON app_user_state.app_id = apps.id
@@ -273,23 +278,31 @@ class Registry:
             params["actor_id"] = actor_id
         if fts:
             sql = """
-                SELECT apps.*
+                SELECT apps.* {select_user_state}
                 FROM apps
                 JOIN apps_fts ON apps.rowid = apps_fts.rowid
                 {join_user_state}
                 WHERE apps_fts MATCH :q
                 ORDER BY {order_by}
                 LIMIT :limit OFFSET :offset
-            """.format(join_user_state=join_user_state, order_by=order_by)
+            """.format(
+                select_user_state=select_user_state,
+                join_user_state=join_user_state,
+                order_by=order_by,
+            )
             params["q"] = fts
         else:
             sql = """
-                SELECT apps.*
+                SELECT apps.* {select_user_state}
                 FROM apps
                 {join_user_state}
                 ORDER BY {order_by}
                 LIMIT :limit OFFSET :offset
-            """.format(join_user_state=join_user_state, order_by=order_by)
+            """.format(
+                select_user_state=select_user_state,
+                join_user_state=join_user_state,
+                order_by=order_by,
+            )
         result = await self.db.execute(sql, params)
         return [_row_to_app(row) for row in result.rows]
 
