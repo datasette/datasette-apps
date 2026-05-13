@@ -7,6 +7,7 @@ from datasette import Forbidden, NotFound, Response
 
 from .csp import build_csp
 from .data_access import AppQueryError, run_app_query
+from .permissions import AppResource, AppsResource
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
 from .registry import Registry
 
@@ -19,6 +20,13 @@ def _require_actor(request):
 
 def _actor_id(actor):
     return str(actor.get("id") or "")
+
+
+async def _ensure_app_permission(datasette, actor, action, app_id):
+    if not await datasette.allowed(
+        action=action, resource=AppResource(app_id), actor=actor
+    ):
+        raise Forbidden(f"Permission denied: {action}")
 
 
 def _page(title, body):
@@ -42,11 +50,15 @@ def _app_link(app):
 
 
 async def apps_index(datasette, request):
-    _require_actor(request)
+    actor = _require_actor(request)
     registry = Registry(datasette)
     apps = await registry.list_apps(q=request.args.get("q"))
     items = []
     for app in apps:
+        if not await datasette.allowed(
+            action="view-app", resource=AppResource(app["id"]), actor=actor
+        ):
+            continue
         href = html.escape(_app_link(app), quote=True)
         items.append(
             "<li>"
@@ -69,6 +81,10 @@ async def apps_index(datasette, request):
 
 async def create_app(datasette, request):
     actor = _require_actor(request)
+    if not await datasette.allowed(
+        action="create-app", resource=AppsResource(), actor=actor
+    ):
+        raise Forbidden("Permission denied: create-app")
     if request.method == "GET":
         body = """
         <form method="post">
@@ -97,6 +113,7 @@ async def view_app(datasette, request):
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "view-app", app_id)
     version = await registry.get_current_version(app_id)
     await registry.record_access(_actor_id(actor), app_id)
     csp = build_csp(await registry.get_csp_origins(app_id))
@@ -112,12 +129,13 @@ async def view_app(datasette, request):
 
 
 async def edit_app(datasette, request):
-    _require_actor(request)
+    actor = _require_actor(request)
     app_id = request.url_vars["id"]
     registry = Registry(datasette)
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "edit-app", app_id)
     if request.method == "GET":
         version = await registry.get_current_version(app_id)
         body = f"""
@@ -141,12 +159,13 @@ async def edit_app(datasette, request):
 
 
 async def app_json(datasette, request):
-    _require_actor(request)
+    actor = _require_actor(request)
     app_id = request.url_vars["id"]
     registry = Registry(datasette)
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "view-app", app_id)
     version = await registry.get_current_version(app_id)
     return Response.json({"app": app, "version": version})
 
@@ -159,6 +178,7 @@ async def capability_request(datasette, request):
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "view-app", app_id)
     if capability != "datasette.query":
         return Response.json(
             {"ok": False, "error": f"Unknown capability: {capability}"},
@@ -188,6 +208,7 @@ async def launch_app(datasette, request):
     app = await registry.get_app(app_id)
     if app is None:
         raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "view-app", app_id)
     if not app["external"]:
         return Response.redirect(app["path"])
     await registry.record_access(_actor_id(actor), app_id)

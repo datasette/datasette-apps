@@ -1,5 +1,6 @@
 from datasette import hookimpl
 
+from .permissions import app_permission_sql, register_app_actions
 from .registry import Registry
 from .views import (
     app_json,
@@ -29,3 +30,18 @@ def register_routes():
         ),
         (r"^/-/apps/(?P<id>[^/]+)$", view_app),
     ]
+
+
+@hookimpl
+def register_actions(datasette):
+    return register_app_actions()
+
+
+@hookimpl
+def permission_resources_sql(datasette, actor, action):
+    return app_permission_sql(actor, action)
+
+
+@hookimpl
+async def startup(datasette):
+    await Registry(datasette).ensure_tables()

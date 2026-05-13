@@ -35,6 +35,8 @@ Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content
 
 Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped capability endpoint. Those queries are read-only and are limited to the intersection of the current actor's Datasette permissions and the app's own table/view/column grants.
 
+The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can view, edit, and manage their own apps; external apps registered by plugins are visible to signed-in users by default.
+
 Plugins can add their own apps to the central catalog during startup:
 
 ```python
