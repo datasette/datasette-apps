@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ app.name }}{% endblock %}
+
+{% block extra_head %}
+{{ codemirror_assets|safe }}
+{% endblock %}
+
+{% block content %}
+<h1>Edit {{ app.name }}</h1>
+
+<form method="post">
+  <p><label>Name <input type="text" name="name" value="{{ app.name }}"></label></p>
+  <p><label>Description <input type="text" name="description" value="{{ app.description }}"></label></p>
+  <p><label>HTML <textarea id="html-editor" name="html">{{ html_source }}</textarea></label></p>
+
+  <h2>App access</h2>
+  <p>
+    <label>Who can open this app
+      <select name="access_mode">
+        <option value="private"{% if access_mode == "private" %} selected{% endif %}>Private</option>
+        <option value="signed-in"{% if access_mode == "signed-in" %} selected{% endif %}>Signed-in users</option>
+        <option value="specific"{% if access_mode == "specific" %} selected{% endif %}>Specific users</option>
+      </select>
+    </label>
+  </p>
+  <p><label>Specific actor IDs
+    <textarea name="actor_ids" rows="4" cols="80">{{ actor_ids }}</textarea>
+  </label></p>
+
+  <h2>Data access</h2>
+  <p><label>Read-only table/view grants JSON
+    <textarea name="data_permissions" rows="8" cols="100">{{ data_permissions }}</textarea>
+  </label></p>
+
+  <h2>Network access</h2>
+  <p><label>Allowed fetch() origins
+    <textarea name="csp_origins" rows="4" cols="100">{{ csp_origins }}</textarea>
+  </label></p>
+
+  <h2>Capabilities</h2>
+  <p><label>Capability grants JSON
+    <textarea name="capability_grants" rows="8" cols="100">{{ capability_grants }}</textarea>
+  </label></p>
+
+  <p><button type="submit">Save app</button></p>
+</form>
+{% endblock %}

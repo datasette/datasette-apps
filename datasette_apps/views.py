@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+from urllib.parse import urlencode
 
 from datasette import Forbidden, NotFound, Response
 
@@ -31,20 +32,6 @@ async def _ensure_app_permission(datasette, actor, action, app_id):
         action=action, resource=AppResource(app_id), actor=actor
     ):
         raise Forbidden(f"Permission denied: {action}")
-
-
-def _page(title, body):
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>{html.escape(title)}</title>
-</head>
-<body>
-  <h1>{html.escape(title)}</h1>
-  {body}
-</body>
-</html>"""
 
 
 def _codemirror_assets():
@@ -89,40 +76,33 @@ async def apps_index(datasette, request):
     )
     has_next = len(apps) > page_size
     apps = apps[:page_size]
-    items = []
+    visible_apps = []
     for app in apps:
         if not await datasette.allowed(
             action="view-app", resource=AppResource(app["id"]), actor=actor
         ):
             continue
-        href = html.escape(_app_link(app), quote=True)
-        items.append(
-            "<li>"
-            f"<a href=\"{href}\">{html.escape(app['name'])}</a>"
-            f"<p>{html.escape(app['description'])}</p>"
-            "</li>"
-        )
-    next_link = ""
+        app = dict(app)
+        app["href"] = _app_link(app)
+        visible_apps.append(app)
+    next_url = None
     if has_next:
         next_offset = offset + page_size
-        q = request.args.get("q")
-        href = f"/-/apps?next={next_offset}"
-        if q:
-            href += f"&q={html.escape(q, quote=True)}"
-        next_link = f'<p><a rel="next" href="{href}">Next</a></p>'
-    body = """
-    <p><a href="/-/apps/create">Create app</a></p>
-    <form method="get" action="/-/apps">
-      <input type="search" name="q" placeholder="Search apps">
-      <button type="submit">Search</button>
-    </form>
-    <ul>{}</ul>
-    {}
-    """.format(
-        "\n".join(items),
-        next_link,
+        params = {"next": next_offset}
+        if request.args.get("q"):
+            params["q"] = request.args.get("q")
+        next_url = "/-/apps?" + urlencode(params)
+    return Response.html(
+        await datasette.render_template(
+            "app_list.html",
+            {
+                "apps": visible_apps,
+                "q": request.args.get("q"),
+                "next_url": next_url,
+            },
+            request=request,
+        )
     )
-    return Response.html(_page("Apps", body))
 
 
 async def create_app(datasette, request):
@@ -133,26 +113,16 @@ async def create_app(datasette, request):
         raise Forbidden("Permission denied: create-app")
     if request.method == "GET":
         prompt = await build_llm_prompt(datasette, actor)
-        body = f"""
-        <form method="post">
-          <p><label>Name <input type="text" name="name"></label></p>
-          <p><label>Description <input type="text" name="description"></label></p>
-          <p><label>HTML <textarea id="html-editor" name="html"></textarea></label></p>
-          <p><button type="submit">Create app</button></p>
-        </form>
-        <section>
-          <h2>LLM prompt</h2>
-          <p><button type="button" id="copy-llm-prompt">Copy prompt</button></p>
-          <textarea id="llm-prompt" rows="24" cols="100" readonly>{html.escape(prompt)}</textarea>
-        </section>
-        <script>
-        document.getElementById("copy-llm-prompt").addEventListener("click", async function() {{
-          await navigator.clipboard.writeText(document.getElementById("llm-prompt").value);
-        }});
-        </script>
-        {_codemirror_assets()}
-        """
-        return Response.html(_page("Create app", body))
+        return Response.html(
+            await datasette.render_template(
+                "app_create.html",
+                {
+                    "llm_prompt": prompt,
+                    "codemirror_assets": _codemirror_assets(),
+                },
+                request=request,
+            )
+        )
 
     post = await request.post_vars()
     app = await Registry(datasette).create_stored_app(
@@ -175,15 +145,19 @@ async def view_app(datasette, request):
     version = await registry.get_current_version(app_id)
     await registry.record_access(_actor_id(actor), app_id)
     csp = build_csp(await registry.get_csp_origins(app_id))
-    srcdoc = html.escape(
-        build_app_srcdoc(version["html"], csp, iframe_bridge_script()), quote=True
+    srcdoc = build_app_srcdoc(version["html"], csp, iframe_bridge_script())
+    return Response.html(
+        await datasette.render_template(
+            "app_view.html",
+            {
+                "app": app,
+                "csp": csp,
+                "srcdoc": srcdoc,
+                "parent_bridge": parent_bridge_script(app_id),
+            },
+            request=request,
+        )
     )
-    body = f"""
-    <p><a href="/-/apps/{html.escape(app_id)}/edit">Edit app</a></p>
-    <iframe id="datasette-app-frame" sandbox="allow-scripts" csp="{html.escape(csp, quote=True)}" srcdoc="{srcdoc}" style="width: 100%; min-height: 70vh; border: 1px solid #ccc;"></iframe>
-    {parent_bridge_script(app_id)}
-    """
-    return Response.html(_page(app["name"], body))
 
 
 async def edit_app(datasette, request):
@@ -205,44 +179,22 @@ async def edit_app(datasette, request):
             await registry.get_capability_grants(app_id), indent=2
         )
         actor_ids = "\n".join(await registry.get_access_actor_ids(app_id))
-        private_selected = " selected" if access_mode == "private" else ""
-        signed_in_selected = " selected" if access_mode == "signed-in" else ""
-        specific_selected = " selected" if access_mode == "specific" else ""
-        body = f"""
-        <form method="post">
-          <p><label>Name <input type="text" name="name" value="{html.escape(app['name'], quote=True)}"></label></p>
-          <p><label>Description <input type="text" name="description" value="{html.escape(app['description'], quote=True)}"></label></p>
-          <p><label>HTML <textarea id="html-editor" name="html">{html.escape(version['html'])}</textarea></label></p>
-          <h2>App access</h2>
-          <p>
-            <label>Who can open this app
-              <select name="access_mode">
-                <option value="private"{private_selected}>Private</option>
-                <option value="signed-in"{signed_in_selected}>Signed-in users</option>
-                <option value="specific"{specific_selected}>Specific users</option>
-              </select>
-            </label>
-          </p>
-          <p><label>Specific actor IDs
-            <textarea name="actor_ids" rows="4" cols="80">{html.escape(actor_ids)}</textarea>
-          </label></p>
-          <h2>Data access</h2>
-          <p><label>Read-only table/view grants JSON
-            <textarea name="data_permissions" rows="8" cols="100">{html.escape(data_permissions)}</textarea>
-          </label></p>
-          <h2>Network access</h2>
-          <p><label>Allowed fetch() origins
-            <textarea name="csp_origins" rows="4" cols="100">{html.escape(csp_origins)}</textarea>
-          </label></p>
-          <h2>Capabilities</h2>
-          <p><label>Capability grants JSON
-            <textarea name="capability_grants" rows="8" cols="100">{html.escape(capability_grants)}</textarea>
-          </label></p>
-          <p><button type="submit">Save app</button></p>
-        </form>
-        {_codemirror_assets()}
-        """
-        return Response.html(_page(f"Edit {app['name']}", body))
+        return Response.html(
+            await datasette.render_template(
+                "app_edit.html",
+                {
+                    "app": app,
+                    "html_source": version["html"],
+                    "access_mode": access_mode,
+                    "actor_ids": actor_ids,
+                    "data_permissions": data_permissions,
+                    "csp_origins": csp_origins,
+                    "capability_grants": capability_grants,
+                    "codemirror_assets": _codemirror_assets(),
+                },
+                request=request,
+            )
+        )
 
     post = await request.post_vars()
     await registry.update_stored_app(

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Apps{% endblock %}
+
+{% block content %}
+<h1>Apps</h1>
+
+<p><a href="/-/apps/create">Create app</a></p>
+
+<form method="get" action="/-/apps">
+  <input type="search" name="q" placeholder="Search apps" value="{{ q or '' }}">
+  <button type="submit">Search</button>
+</form>
+
+<ul>
+{% for app in apps %}
+  <li>
+    <a href="{{ app.href }}">{{ app.name }}</a>
+    <p>{{ app.description }}</p>
+  </li>
+{% endfor %}
+</ul>
+
+{% if next_url %}
+  <p><a rel="next" href="{{ next_url }}">Next</a></p>
+{% endif %}
+{% endblock %}

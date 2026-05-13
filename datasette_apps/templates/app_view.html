@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app.name }}{% endblock %}
+
+{% block content %}
+<h1>{{ app.name }}</h1>
+
+<p><a href="/-/apps/{{ app.id }}/edit">Edit app</a></p>
+<iframe
+  id="datasette-app-frame"
+  sandbox="allow-scripts"
+  csp="{{ csp }}"
+  srcdoc="{{ srcdoc }}"
+  style="width: 100%; min-height: 70vh; border: 1px solid #ccc;"
+></iframe>
+{{ parent_bridge|safe }}
+{% endblock %}

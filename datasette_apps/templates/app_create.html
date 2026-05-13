@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Create app{% endblock %}
+
+{% block extra_head %}
+{{ codemirror_assets|safe }}
+{% endblock %}
+
+{% block content %}
+<h1>Create app</h1>
+
+<form method="post">
+  <p><label>Name <input type="text" name="name"></label></p>
+  <p><label>Description <input type="text" name="description"></label></p>
+  <p><label>HTML <textarea id="html-editor" name="html"></textarea></label></p>
+  <p><button type="submit">Create app</button></p>
+</form>
+
+<section>
+  <h2>LLM prompt</h2>
+  <p><button type="button" id="copy-llm-prompt">Copy prompt</button></p>
+  <textarea id="llm-prompt" rows="24" cols="100" readonly>{{ llm_prompt }}</textarea>
+</section>
+
+<script>
+document.getElementById("copy-llm-prompt").addEventListener("click", async function() {
+  await navigator.clipboard.writeText(document.getElementById("llm-prompt").value);
+});
+</script>
+{% endblock %}
