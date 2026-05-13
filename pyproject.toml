@@ -13,6 +13,9 @@ dependencies = [
     "datasette"
 ]
 
+[tool.uv.sources]
+datasette = { path = "../datasette", editable = true }
+
 [dependency-groups]
 dev = [
     "pytest",
@@ -40,3 +43,5 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.setuptools.package-data]
 datasette_apps = ["static/*", "templates/*"]
 
+[tool.setuptools.packages.find]
+include = ["datasette_apps"]
