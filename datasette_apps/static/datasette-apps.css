@@ -205,21 +205,27 @@
   margin: 0;
 }
 
-.datasette-app-pin-button {
+.datasette-app-button,
+.datasette-app-button:link,
+.datasette-app-button:visited {
   background: #fff;
   border: 1px solid #bbb;
   border-radius: 3px;
   color: #333;
   cursor: pointer;
+  display: inline-block;
   font: inherit;
   line-height: 1;
   padding: 0.4rem 0.7rem;
+  text-decoration: none;
 }
 
-.datasette-app-pin-button:hover,
-.datasette-app-pin-button:focus {
+.datasette-app-button:hover,
+.datasette-app-button:focus,
+.datasette-app-button:active {
   border-color: #276890;
   color: #276890;
+  text-decoration: none;
 }
 
 .datasette-app-pin-button[aria-pressed="true"] {

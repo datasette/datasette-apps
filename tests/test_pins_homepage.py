@@ -85,6 +85,10 @@ async def test_stored_app_view_includes_pin_controls():
 
     view = await datasette.client.get(app["path"], actor={"id": "alice"})
     assert view.status_code == 200
+    assert 'href="/-/apps"' in view.text
+    assert ">All apps</a>" in view.text
+    assert f'href="/-/apps/{app["id"]}/edit"' in view.text
+    assert "datasette-app-button" in view.text
     assert f'action="/-/apps/{app["id"]}/pin"' in view.text
     assert 'aria-label="Pin Pinned tool"' in view.text
 
