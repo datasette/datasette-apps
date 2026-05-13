@@ -79,7 +79,37 @@
 }
 
 .datasette-apps-search {
+  align-items: stretch;
+  display: flex;
+  gap: 0.5rem;
   margin: 0 0 1rem;
+}
+
+.datasette-apps-search input[type="search"] {
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 1.1rem;
+  max-width: 100%;
+  padding: 0.55rem 0.65rem;
+  width: min(34rem, 100%);
+}
+
+.datasette-apps-search button {
+  background: #276890;
+  border: 1px solid #1f5678;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.55rem 0.85rem;
+}
+
+.datasette-apps-search button:hover,
+.datasette-apps-search button:focus {
+  background: #1f5678;
 }
 
 .datasette-app-form {
@@ -346,5 +376,18 @@
 
   .datasette-app-card-grid {
     grid-template-columns: 1fr;
+  }
+
+  .datasette-apps-search {
+    display: block;
+  }
+
+  .datasette-apps-search input[type="search"],
+  .datasette-apps-search button {
+    width: 100%;
+  }
+
+  .datasette-apps-search button {
+    margin-top: 0.5rem;
   }
 }
