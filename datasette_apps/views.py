@@ -8,6 +8,7 @@ from datasette import Forbidden, NotFound, Response
 from .csp import build_csp
 from .data_access import AppQueryError, run_app_query
 from .permissions import AppResource, AppsResource
+from .prompt import build_llm_prompt
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
 from .registry import Registry
 
@@ -86,13 +87,24 @@ async def create_app(datasette, request):
     ):
         raise Forbidden("Permission denied: create-app")
     if request.method == "GET":
-        body = """
+        prompt = await build_llm_prompt(datasette, actor)
+        body = f"""
         <form method="post">
           <p><label>Name <input type="text" name="name"></label></p>
           <p><label>Description <input type="text" name="description"></label></p>
           <p><label>HTML <textarea name="html"></textarea></label></p>
           <p><button type="submit">Create app</button></p>
         </form>
+        <section>
+          <h2>LLM prompt</h2>
+          <p><button type="button" id="copy-llm-prompt">Copy prompt</button></p>
+          <textarea id="llm-prompt" rows="24" cols="100" readonly>{html.escape(prompt)}</textarea>
+        </section>
+        <script>
+        document.getElementById("copy-llm-prompt").addEventListener("click", async function() {{
+          await navigator.clipboard.writeText(document.getElementById("llm-prompt").value);
+        }});
+        </script>
         """
         return Response.html(_page("Create app", body))
 
