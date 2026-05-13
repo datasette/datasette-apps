@@ -85,3 +85,34 @@ async def test_registry_records_access_and_pins_apps():
     await registry.set_pinned("alice", "plugin:one", False)
     state = await registry.get_user_state("alice", "plugin:one")
     assert state["pinned_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_registry_create_stored_app_and_save_versions():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="My app",
+        description="An HTML app",
+        html="<h1>Hello</h1>",
+    )
+
+    assert app["external"] == 0
+    assert len(app["id"]) == 26
+    assert app["id"] == app["id"].lower()
+    assert app["path"] == f"/-/apps/{app['id']}"
+    assert app["current_version"] == 1
+    assert app["actor_id"] == "alice"
+
+    version = await registry.get_current_version(app["id"])
+    assert version["version"] == 1
+    assert version["html"] == "<h1>Hello</h1>"
+
+    await registry.save_new_version(app["id"], "<h1>Updated</h1>")
+    app = await registry.get_app(app["id"])
+    version = await registry.get_current_version(app["id"])
+    assert app["current_version"] == 2
+    assert version["version"] == 2
+    assert version["html"] == "<h1>Updated</h1>"

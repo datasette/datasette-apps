@@ -29,6 +29,8 @@ This plugin allows you to create and modify HTML apps, and provides a plugin hoo
 - `/-/apps/create` for creating a new app
 - `/-/apps/ULID/edit` to edit an existing app
 
+HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and store every edit as a new row in `app_versions`.
+
 Plugins can add their own apps to the central catalog during startup:
 
 ```python

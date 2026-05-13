@@ -16,6 +16,14 @@ CREATE TABLE IF NOT EXISTS apps (
     CHECK (external IN (0, 1))
 );
 
+CREATE TABLE IF NOT EXISTS app_versions (
+    app_id TEXT NOT NULL REFERENCES apps(id),
+    version INTEGER NOT NULL,
+    html TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (app_id, version)
+);
+
 CREATE INDEX IF NOT EXISTS idx_apps_updated ON apps(updated_at DESC, id);
 CREATE INDEX IF NOT EXISTS idx_apps_external_updated ON apps(external, updated_at DESC, id);
 CREATE INDEX IF NOT EXISTS idx_apps_source ON apps(source);

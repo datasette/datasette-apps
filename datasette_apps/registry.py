@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone
 
 from .db import ensure_tables
+from .ids import monotonic_ulid
 
 
 def _now():
@@ -26,6 +27,12 @@ def _row_to_app(row):
 
 
 def _row_to_state(row):
+    if row is None:
+        return None
+    return dict(row)
+
+
+def _row_to_version(row):
     if row is None:
         return None
     return dict(row)
@@ -106,6 +113,84 @@ class Registry:
                 source=app.get("source") or source,
                 metadata=app.get("metadata") or {},
             )
+
+    async def create_stored_app(self, actor_id, name, description, html):
+        await self.ensure_tables()
+        app_id = monotonic_ulid()
+        now = _now()
+
+        def create(conn):
+            conn.execute(
+                """
+                INSERT INTO apps (
+                    id, external, name, description, path, source, metadata,
+                    actor_id, current_version, created_at, updated_at
+                )
+                VALUES (?, 0, ?, ?, ?, 'datasette-apps', '{}', ?, 1, ?, ?)
+                """,
+                (
+                    app_id,
+                    name,
+                    description or "",
+                    f"/-/apps/{app_id}",
+                    actor_id,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO app_versions (app_id, version, html, created_at)
+                VALUES (?, 1, ?, ?)
+                """,
+                (app_id, html, now),
+            )
+
+        await self.db.execute_write_fn(create)
+        return await self.get_app(app_id)
+
+    async def save_new_version(self, app_id, html):
+        await self.ensure_tables()
+        now = _now()
+
+        def save(conn):
+            row = conn.execute(
+                "SELECT current_version FROM apps WHERE id = ?", (app_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(app_id)
+            next_version = int(row["current_version"] or 0) + 1
+            conn.execute(
+                """
+                INSERT INTO app_versions (app_id, version, html, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (app_id, next_version, html, now),
+            )
+            conn.execute(
+                """
+                UPDATE apps
+                SET current_version = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (next_version, now, app_id),
+            )
+
+        await self.db.execute_write_fn(save)
+
+    async def get_current_version(self, app_id):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT app_versions.*
+            FROM app_versions
+            JOIN apps ON apps.id = app_versions.app_id
+            WHERE apps.id = :app_id
+              AND app_versions.version = apps.current_version
+            """,
+            {"app_id": app_id},
+        )
+        return _row_to_version(result.first())
 
     async def remove_app(self, id):
         await self.ensure_tables()
