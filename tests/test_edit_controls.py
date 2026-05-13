@@ -32,6 +32,10 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'value="_memory"' in response.text
     assert "Network access" in response.text
     assert "Capabilities" in response.text
+    assert response.text.index('class="datasette-app-edit-sidebar"') < response.text.index(
+        "App access"
+    )
+    assert response.text.index("App access") < response.text.index("Data access")
     assert response.text.index("Data access") < response.text.index("Save app")
     assert response.text.index("Capabilities") < response.text.index("Save app")
 

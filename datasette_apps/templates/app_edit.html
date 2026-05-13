@@ -24,7 +24,9 @@
         <label for="html-editor">HTML</label>
         <textarea id="html-editor" name="html">{{ html_source }}</textarea>
       </div>
+    </div>
 
+    <aside class="datasette-app-edit-sidebar">
       <h2>App access</h2>
       <div class="datasette-app-form-row">
         <label for="app-access-mode">Who can open this app</label>
@@ -38,9 +40,7 @@
         <label for="app-actor-ids">Specific actor IDs</label>
         <textarea id="app-actor-ids" name="actor_ids" rows="4">{{ actor_ids }}</textarea>
       </div>
-    </div>
 
-    <aside class="datasette-app-edit-sidebar">
       <h2>Data access</h2>
       <div class="datasette-app-form-row">
         <fieldset class="datasette-app-checkbox-group">
