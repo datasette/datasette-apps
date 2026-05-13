@@ -26,7 +26,7 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'class="datasette-app-edit-sidebar"' in response.text
     assert 'textarea id="app-description" name="description"' in response.text
     assert "App access" in response.text
-    assert "Private" in response.text
+    assert "Private (only me)" in response.text
     assert "Signed-in users" in response.text
     assert "Specific users" not in response.text
     assert "Specific actor IDs" not in response.text
