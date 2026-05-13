@@ -139,11 +139,16 @@ async def create_app(datasette, request):
         raise Forbidden("Permission denied: create-app")
     if request.method == "GET":
         prompt = await build_llm_prompt(datasette, actor)
+        sql_database_options = [
+            {"name": database_name, "selected": False}
+            for database_name in await _visible_database_names(datasette, actor)
+        ]
         return Response.html(
             await datasette.render_template(
                 "app_create.html",
                 {
                     "llm_prompt": prompt,
+                    "sql_database_options": sql_database_options,
                     "codemirror_assets": _codemirror_assets(),
                 },
                 request=request,
@@ -157,6 +162,14 @@ async def create_app(datasette, request):
         description=post.get("description") or "",
         html=post.get("html") or "",
     )
+    if "sql_databases_present" in post:
+        visible_database_names = set(await _visible_database_names(datasette, actor))
+        sql_databases = [
+            database_name
+            for database_name in post.getlist("sql_databases")
+            if database_name in visible_database_names
+        ]
+        await Registry(datasette).set_sql_databases(app["id"], sql_databases)
     return Response.redirect(app["path"])
 
 

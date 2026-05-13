@@ -37,6 +37,8 @@ async def test_create_view_and_edit_stored_app():
             "name": "Hello app",
             "description": "Says hello",
             "html": "<!DOCTYPE html><title>Hello</title><h1>Hello</h1>",
+            "sql_databases_present": "1",
+            "sql_databases": "_memory",
         },
     )
     assert create.status_code == 302
@@ -44,6 +46,8 @@ async def test_create_view_and_edit_stored_app():
     assert re.match(r"^/-/apps/[0-9a-z]{26}$", location)
 
     app_id = location.rsplit("/", 1)[-1]
+    assert await Registry(datasette).get_sql_databases(app_id) == ["_memory"]
+
     view = await datasette.client.get(location, actor={"id": "alice"})
     assert view.status_code == 200
     assert "Hello app" in view.text
