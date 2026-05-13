@@ -242,7 +242,7 @@ Example:
 
 - An app allowed to query `_memory` and `content` gets two `app_sql_databases` rows. If the viewing actor can normally execute SQL against `content` but not `_memory`, Datasette's query API denies `_memory`.
 
-The Data access UI should list databases visible to the editing actor as checkbox options. Users can select none, one, or more databases.
+The read-only Data access UI should list databases visible to the editing actor as checkbox options. Users can select none, one, or more databases.
 
 `datasette.executeQuery()` and canned write-query execution are deliberately not in day one. The schema and capability design should leave an obvious later path for a `canned-query-execute` permission type, but the first implementation only exposes `datasette.query()`.
 

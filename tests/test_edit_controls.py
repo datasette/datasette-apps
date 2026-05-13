@@ -31,8 +31,8 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert "Specific users" not in response.text
     assert "Specific actor IDs" not in response.text
     assert 'name="actor_ids"' not in response.text
-    assert "Data access" in response.text
-    assert "SQL query databases" in response.text
+    assert "Read-only data access" in response.text
+    assert "Read-only SQL query databases" in response.text
     assert 'name="sql_databases"' in response.text
     assert 'value="_memory"' in response.text
     assert "Network access" in response.text
@@ -43,8 +43,8 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert response.text.index('class="datasette-app-edit-sidebar"') < response.text.index(
         "App access"
     )
-    assert response.text.index("App access") < response.text.index("Data access")
-    assert response.text.index("Data access") < response.text.index("Save app")
+    assert response.text.index("App access") < response.text.index("Read-only data access")
+    assert response.text.index("Read-only data access") < response.text.index("Save app")
 
 
 @pytest.mark.asyncio
