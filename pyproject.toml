@@ -10,7 +10,7 @@ classifiers=[
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "datasette"
+    "datasette>=1.0a30"
 ]
 
 [tool.uv.sources]

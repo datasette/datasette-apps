@@ -1,4 +1,5 @@
 from datasette import hookimpl
+from datasette.jump import JumpSQL
 from datasette.plugins import pm
 
 from . import hookspecs
@@ -49,6 +50,43 @@ def register_actions(datasette):
 @hookimpl
 def permission_resources_sql(datasette, actor, action):
     return app_permission_sql(actor, action)
+
+
+@hookimpl
+def jump_items_sql(datasette, actor, request):
+    async def inner():
+        app_sql, app_params = await datasette.allowed_resources_sql(
+            action="view-app", actor=actor
+        )
+        return JumpSQL(
+            sql=f"""
+            WITH allowed_apps AS (
+                {app_sql}
+            )
+            SELECT
+                'app' AS type,
+                apps.name AS label,
+                apps.description AS description,
+                json_object(
+                    'method', 'path',
+                    'path', CASE
+                        WHEN apps.external = 1
+                        THEN '/-/apps/' || apps.id || '/launch'
+                        ELSE apps.path
+                    END
+                ) AS url,
+                'app' || apps.name || ' ' || apps.description || ' ' ||
+                    apps.id || ' ' || apps.source AS search_text,
+                NULL AS display_name
+            FROM apps
+            JOIN allowed_apps
+                ON allowed_apps.parent = 'apps'
+               AND allowed_apps.child = apps.id
+            """,
+            params=app_params,
+        )
+
+    return inner
 
 
 @hookimpl
