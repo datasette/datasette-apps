@@ -103,10 +103,8 @@ def app_permission_sql(actor, action):
            'App access rule' AS reason
     FROM app_access
     WHERE action = :action
-      AND (
-        (subject_type = 'authenticated' AND :actor_id IS NOT NULL)
-        OR (subject_type = 'actor' AND subject_id = :actor_id)
-      )
+      AND subject_type = 'authenticated'
+      AND :actor_id IS NOT NULL
     """
     return PermissionSQL(
         source="datasette-apps",

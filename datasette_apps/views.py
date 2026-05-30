@@ -7,9 +7,6 @@ from urllib.parse import urlencode
 from datasette import Forbidden, NotFound, Response
 from datasette.resources import DatabaseResource
 
-from datasette.utils import await_me_maybe
-
-from .capabilities import get_app_capabilities
 from .csp import build_csp
 from .data_access import AppQueryError, run_app_query
 from .permissions import AppResource, AppsResource
@@ -76,14 +73,6 @@ async def _visible_database_names(datasette, actor):
         ):
             names.append(database_name)
     return names
-
-
-def _actor_ids_from_post(post):
-    return [
-        actor_id.strip()
-        for actor_id in (post.get("actor_ids") or "").replace(",", "\n").splitlines()
-        if actor_id.strip()
-    ]
 
 
 def _csp_origins_from_post(post):
@@ -189,11 +178,7 @@ async def create_app(datasette, request):
         html=post.get("html") or "",
     )
     if "access_mode" in post:
-        await registry.set_access_mode(
-            app["id"],
-            post.get("access_mode") or "private",
-            actor_ids=_actor_ids_from_post(post),
-        )
+        await registry.set_access_mode(app["id"], post.get("access_mode") or "private")
     if "sql_databases_present" in post:
         await registry.set_sql_databases(
             app["id"], await _selected_sql_databases(datasette, actor, post)
@@ -254,9 +239,6 @@ async def edit_app(datasette, request):
             for database_name in await _visible_database_names(datasette, actor)
         ]
         csp_origins = "\n".join(await registry.get_csp_origins(app_id))
-        capability_grants = json.dumps(
-            await registry.get_capability_grants(app_id), indent=2
-        )
         return Response.html(
             await datasette.render_template(
                 "app_edit.html",
@@ -266,7 +248,6 @@ async def edit_app(datasette, request):
                     "access_mode": access_mode,
                     "sql_database_options": sql_database_options,
                     "csp_origins": csp_origins,
-                    "capability_grants": capability_grants,
                     "codemirror_assets": _codemirror_assets(),
                 },
                 request=request,
@@ -281,21 +262,13 @@ async def edit_app(datasette, request):
         post.get("html") or "",
     )
     if "access_mode" in post:
-        await registry.set_access_mode(
-            app_id,
-            post.get("access_mode") or "private",
-            actor_ids=_actor_ids_from_post(post),
-        )
+        await registry.set_access_mode(app_id, post.get("access_mode") or "private")
     if "sql_databases_present" in post:
         await registry.set_sql_databases(
             app_id, await _selected_sql_databases(datasette, actor, post)
         )
     if "csp_origins" in post:
         await registry.set_csp_origins(app_id, _csp_origins_from_post(post))
-    if "capability_grants" in post:
-        await registry.set_capability_grants(
-            app_id, json.loads(post.get("capability_grants") or "{}")
-        )
     return Response.redirect(f"/-/apps/{app_id}")
 
 
@@ -333,48 +306,14 @@ async def unpin_app(datasette, request):
     return await _redirect_after_pin(request)
 
 
-async def capability_request(datasette, request):
+async def app_query(datasette, request):
     actor = _require_actor(request)
     app_id = request.url_vars["id"]
-    capability = request.url_vars["capability"]
     registry = Registry(datasette)
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
-    if capability != "datasette.query":
-        try:
-            body = json.loads((await request.post_body()).decode("utf-8") or "{}")
-        except json.JSONDecodeError as e:
-            return Response.json({"ok": False, "error": f"Invalid request: {e}"})
-        capabilities = await get_app_capabilities(datasette)
-        descriptor = capabilities.get(capability)
-        if descriptor is None or descriptor.handler is None:
-            return Response.json(
-                {"ok": False, "error": f"Unknown capability: {capability}"},
-                status=404,
-            )
-        grant = await registry.get_capability_grant(app_id, capability)
-        if grant is None and not descriptor.default_enabled:
-            return Response.json(
-                {"ok": False, "error": f"Capability is not enabled: {capability}"}
-            )
-        config = grant["config"] if grant else {}
-        try:
-            result = await await_me_maybe(
-                descriptor.handler(
-                    datasette=datasette,
-                    request=request,
-                    app=app,
-                    actor=actor,
-                    input=body,
-                    config=config,
-                )
-            )
-            return Response.json({"ok": True, "result": result})
-        except Exception as e:
-            return Response.json({"ok": False, "error": str(e)})
-
     try:
         body = json.loads((await request.post_body()).decode("utf-8") or "{}")
         result = await run_app_query(

@@ -130,7 +130,9 @@ async def test_registry_create_stored_app_and_save_versions():
     assert version["version"] == 1
     assert version["html"] == "<h1>Hello</h1>"
 
-    await registry.save_new_version(app["id"], "<h1>Updated</h1>")
+    await registry.update_stored_app(
+        app["id"], "My app", "An HTML app", "<h1>Updated</h1>"
+    )
     app = await registry.get_app(app["id"])
     version = await registry.get_current_version(app["id"])
     assert app["current_version"] == 2

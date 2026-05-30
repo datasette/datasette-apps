@@ -53,9 +53,10 @@ async def test_create_view_and_edit_stored_app():
     assert view.status_code == 200
     assert "Hello app" in view.text
     assert "iframe" in view.text
-    assert "datasette-app-request" in view.text
-    assert "capabilities/" in view.text
-    assert "datasette.query" in view.text
+    assert "datasette-app-query" in view.text
+    assert f"/-/apps/{app_id}/query" in view.text
+    assert "window.datasette" in view.text
+    assert "datasette.request" not in view.text
     assert "Hello" in view.text
 
     edit_form = await datasette.client.get(
@@ -88,3 +89,28 @@ async def test_create_view_and_edit_stored_app():
     assert app["description"] == "Updated"
     assert version["version"] == 2
     assert "Updated" in version["html"]
+
+
+@pytest.mark.asyncio
+async def test_capability_system_removed():
+    datasette = Datasette(memory=True)
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="App",
+        description="",
+        html="",
+    )
+
+    # The generic capability endpoint no longer exists.
+    old = await datasette.client.post(
+        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        actor={"id": "alice"},
+        json={"database": "_memory", "sql": "select 1"},
+    )
+    assert old.status_code == 404
+
+    # The capability module and hookspec are gone.
+    with pytest.raises(ImportError):
+        import datasette_apps.capabilities  # noqa: F401
+    with pytest.raises(ImportError):
+        import datasette_apps.hookspecs  # noqa: F401

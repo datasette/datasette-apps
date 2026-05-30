@@ -185,33 +185,22 @@ def iframe_bridge_script():
     if (message.ok) {
       callbacks.resolve(message.result);
     } else {
-      var errorMessage = message.error || "Capability request failed";
-      postAppError("datasette-request-error", {
-        message: errorMessage,
-        capability: callbacks.capability || ""
-      });
+      var errorMessage = message.error || "Query request failed";
+      postAppError("datasette-query-error", {message: errorMessage});
       callbacks.reject(new Error(errorMessage));
     }
   });
 
   window.datasette = {
-    request: function(capability, input) {
+    query: function(database, sql, params) {
       var id = nextId++;
       return new Promise(function(resolve, reject) {
-        pending.set(id, {resolve: resolve, reject: reject, capability: capability});
+        pending.set(id, {resolve: resolve, reject: reject});
         parent.postMessage({
-          type: "datasette-app-request",
+          type: "datasette-app-query",
           id: id,
-          capability: capability,
-          input: input || {}
+          input: {database: database, sql: sql, params: params || {}}
         }, "*");
-      });
-    },
-    query: function(database, sql, params) {
-      return this.request("datasette.query", {
-        database: database,
-        sql: sql,
-        params: params || {}
       });
     }
   };
@@ -220,7 +209,7 @@ def iframe_bridge_script():
 
 
 def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
-    endpoint_base = f"/-/apps/{app_id}/capabilities/"
+    query_endpoint = f"/-/apps/{app_id}/query"
     script = """<script>
 (function() {
   var iframe = document.getElementById(__IFRAME_ID__);
@@ -287,9 +276,6 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
     if (error.effectiveDirective) {
       parts.push("Effective directive: " + error.effectiveDirective);
     }
-    if (error.capability) {
-      parts.push("Capability: " + error.capability);
-    }
     if (error.stack) {
       parts.push(error.stack);
     }
@@ -331,17 +317,17 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
       addAppError(message.error || {});
       return;
     }
-    if (message.type !== "datasette-app-request") {
+    if (message.type !== "datasette-app-query") {
       return;
     }
     var reply = {
       type: "datasette-app-response",
       id: message.id,
       ok: false,
-      error: "Capability request failed"
+      error: "Query request failed"
     };
     try {
-      var response = await fetch(__ENDPOINT_BASE__ + encodeURIComponent(message.capability), {
+      var response = await fetch(__QUERY_ENDPOINT__, {
         method: "POST",
         headers: {"content-type": "application/json"},
         credentials: "same-origin",
@@ -359,7 +345,7 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
 })();
 </script>"""
     return script.replace("__IFRAME_ID__", _json_script_string(iframe_id)).replace(
-        "__ENDPOINT_BASE__", _json_script_string(endpoint_base)
+        "__QUERY_ENDPOINT__", _json_script_string(query_endpoint)
     )
 
 

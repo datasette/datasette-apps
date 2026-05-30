@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from .db import ensure_tables
 from .ids import monotonic_ulid
 from .csp import normalize_connect_origin
-from .capabilities import validate_capability_name
 
 
 def _now():
@@ -150,35 +149,6 @@ class Registry:
 
         await self.db.execute_write_fn(create)
         return await self.get_app(app_id)
-
-    async def save_new_version(self, app_id, html):
-        await self.ensure_tables()
-        now = _now()
-
-        def save(conn):
-            row = conn.execute(
-                "SELECT current_version FROM apps WHERE id = ?", (app_id,)
-            ).fetchone()
-            if row is None:
-                raise KeyError(app_id)
-            next_version = int(row["current_version"] or 0) + 1
-            conn.execute(
-                """
-                INSERT INTO app_versions (app_id, version, html, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (app_id, next_version, html, now),
-            )
-            conn.execute(
-                """
-                UPDATE apps
-                SET current_version = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (next_version, now, app_id),
-            )
-
-        await self.db.execute_write_fn(save)
 
     async def update_stored_app(self, app_id, name, description, html):
         await self.ensure_tables()
@@ -431,92 +401,6 @@ class Registry:
 
         await self.db.execute_write_fn(save)
 
-    async def get_capability_grant(self, app_id, capability):
-        await self.ensure_tables()
-        result = await self.db.execute(
-            """
-            SELECT *
-            FROM app_capability_grants
-            WHERE app_id = :app_id AND capability = :capability
-            """,
-            {"app_id": app_id, "capability": capability},
-        )
-        row = result.first()
-        if row is None:
-            return None
-        grant = dict(row)
-        grant["config"] = _decode_json(grant["config"], {})
-        return grant
-
-    async def get_capability_grants(self, app_id):
-        await self.ensure_tables()
-        result = await self.db.execute(
-            """
-            SELECT *
-            FROM app_capability_grants
-            WHERE app_id = :app_id
-            ORDER BY capability
-            """,
-            {"app_id": app_id},
-        )
-        grants = {}
-        for row in result.rows:
-            grants[row["capability"]] = _decode_json(row["config"], {})
-        return grants
-
-    async def set_capability_grant(self, app_id, capability, config=None):
-        validate_capability_name(capability)
-        await self.ensure_tables()
-        now = _now()
-        await self.db.execute_write(
-            """
-            INSERT INTO app_capability_grants (
-                app_id, capability, config, created_at, updated_at
-            )
-            VALUES (:app_id, :capability, :config, :now, :now)
-            ON CONFLICT(app_id, capability) DO UPDATE SET
-                config = excluded.config,
-                updated_at = excluded.updated_at
-            """,
-            {
-                "app_id": app_id,
-                "capability": capability,
-                "config": json.dumps(config or {}, sort_keys=True),
-                "now": now,
-            },
-        )
-
-    async def set_capability_grants(self, app_id, grants):
-        for capability in grants:
-            validate_capability_name(capability)
-        await self.ensure_tables()
-        now = _now()
-
-        def save(conn):
-            conn.execute(
-                "DELETE FROM app_capability_grants WHERE app_id = ?", (app_id,)
-            )
-            conn.executemany(
-                """
-                INSERT INTO app_capability_grants (
-                    app_id, capability, config, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        app_id,
-                        capability,
-                        json.dumps(config or {}, sort_keys=True),
-                        now,
-                        now,
-                    )
-                    for capability, config in grants.items()
-                ],
-            )
-
-        await self.db.execute_write_fn(save)
-
     async def get_access_mode(self, app_id):
         await self.ensure_tables()
         result = await self.db.execute(
@@ -530,43 +414,13 @@ class Registry:
             """,
             {"app_id": app_id},
         )
-        if result.first():
-            return "signed-in"
-        actor_result = await self.db.execute(
-            """
-            SELECT 1
-            FROM app_access
-            WHERE app_id = :app_id
-              AND action = 'view-app'
-              AND subject_type = 'actor'
-              AND allow = 1
-            """,
-            {"app_id": app_id},
-        )
-        return "specific" if actor_result.first() else "private"
+        return "signed-in" if result.first() else "private"
 
-    async def get_access_actor_ids(self, app_id):
-        await self.ensure_tables()
-        result = await self.db.execute(
-            """
-            SELECT subject_id
-            FROM app_access
-            WHERE app_id = :app_id
-              AND action = 'view-app'
-              AND subject_type = 'actor'
-              AND allow = 1
-            ORDER BY subject_id
-            """,
-            {"app_id": app_id},
-        )
-        return [row["subject_id"] for row in result.rows]
-
-    async def set_access_mode(self, app_id, mode, actor_ids=None):
-        if mode not in {"private", "signed-in", "specific"}:
+    async def set_access_mode(self, app_id, mode):
+        if mode not in {"private", "signed-in"}:
             raise ValueError("Unknown app access mode")
         await self.ensure_tables()
         now = _now()
-        actor_ids = [actor_id for actor_id in actor_ids or [] if actor_id]
 
         def save(conn):
             conn.execute(
@@ -586,17 +440,6 @@ class Registry:
                     VALUES (?, 'view-app', 'authenticated', NULL, 1, ?, ?)
                     """,
                     (app_id, now, now),
-                )
-            if mode == "specific":
-                conn.executemany(
-                    """
-                    INSERT INTO app_access (
-                        app_id, action, subject_type, subject_id,
-                        allow, created_at, updated_at
-                    )
-                    VALUES (?, 'view-app', 'actor', ?, 1, ?, ?)
-                    """,
-                    [(app_id, actor_id, now, now) for actor_id in actor_ids],
                 )
 
         await self.db.execute_write_fn(save)
