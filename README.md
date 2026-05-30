@@ -79,7 +79,6 @@ cd datasette-apps
 # Confirm the plugin is visible
 uv run datasette plugins
 ```
-This repository's `uv` configuration uses the sibling `../datasette` checkout in editable mode for local development.
 
 To run the tests:
 ```bash
