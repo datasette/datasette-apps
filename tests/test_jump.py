@@ -30,13 +30,6 @@ async def test_jump_lists_apps_the_actor_can_view():
         html="<h1>Shared</h1>",
     )
     await registry.set_access_mode(shared["id"], "signed-in")
-    specific = await registry.create_stored_app(
-        actor_id="carol",
-        name="Jumpvisible Specific",
-        description="Specific app",
-        html="<h1>Specific</h1>",
-    )
-    await registry.set_access_mode(specific["id"], "specific", ["bob"])
     await registry.create_stored_app(
         actor_id="carol",
         name="Jumpvisible Private",
@@ -78,6 +71,4 @@ async def test_jump_lists_apps_the_actor_can_view():
     assert sorted(bob_matches) == [
         "Jumpvisible External",
         "Jumpvisible Shared",
-        "Jumpvisible Specific",
     ]
-    assert bob_matches["Jumpvisible Specific"]["url"] == specific["path"]

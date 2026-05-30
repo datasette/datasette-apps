@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS app_access (
     allow INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    CHECK (subject_type IN ('authenticated', 'actor')),
+    CHECK (subject_type IN ('authenticated')),
     CHECK (allow IN (0, 1))
 );
 
@@ -88,18 +88,6 @@ CREATE TABLE IF NOT EXISTS app_csp_origins (
 
 CREATE INDEX IF NOT EXISTS idx_app_csp_origins_app
     ON app_csp_origins(app_id, directive);
-
-CREATE TABLE IF NOT EXISTS app_capability_grants (
-    app_id TEXT NOT NULL REFERENCES apps(id),
-    capability TEXT NOT NULL,
-    config TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (app_id, capability)
-);
-
-CREATE INDEX IF NOT EXISTS idx_app_capability_grants_capability
-    ON app_capability_grants(capability, app_id);
 
 CREATE TABLE IF NOT EXISTS app_user_state (
     actor_id TEXT NOT NULL,

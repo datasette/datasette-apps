@@ -84,9 +84,6 @@ Use this API for data access:
 - If a database is not selected in the app's Data access settings, datasette.query() cannot query it.
 - The returned value has this shape: {{columns: [...], rows: [{{...}}, ...]}}.
 
-Plugin capabilities, if enabled for this app, are requested with:
-- await datasette.request(capabilityName, input)
-
 Available schema for this actor:
 
 {schema}

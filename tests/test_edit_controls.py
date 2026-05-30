@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from datasette.app import Datasette
 
@@ -118,7 +116,7 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
 
 
 @pytest.mark.asyncio
-async def test_edit_form_saves_sql_database_csp_and_capability_grants():
+async def test_edit_form_saves_sql_database_and_csp():
     datasette = Datasette(memory=True)
     registry = Registry(datasette)
     app = await registry.create_stored_app(
@@ -139,16 +137,12 @@ async def test_edit_form_saves_sql_database_csp_and_capability_grants():
             "sql_databases_present": "1",
             "sql_databases": "_memory",
             "csp_origins": "https://api.github.com\n",
-            "capability_grants": json.dumps({"test.echo": {"mode": "friendly"}}),
         },
     )
 
     assert response.status_code == 302
     assert await registry.get_sql_databases(app["id"]) == ["_memory"]
     assert await registry.get_csp_origins(app["id"]) == ["https://api.github.com"]
-    assert (await registry.get_capability_grant(app["id"], "test.echo"))["config"] == {
-        "mode": "friendly"
-    }
 
 
 @pytest.mark.asyncio
@@ -171,42 +165,8 @@ async def test_edit_form_signed_in_access_mode_allows_other_actor():
             "access_mode": "signed-in",
             "sql_databases_present": "1",
             "csp_origins": "",
-            "capability_grants": "{}",
         },
     )
 
     response = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "bob"})
     assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_edit_form_specific_users_access_mode():
-    datasette = Datasette(memory=True)
-    app = await Registry(datasette).create_stored_app(
-        actor_id="alice",
-        name="Team app",
-        description="",
-        html="<h1>Team</h1>",
-    )
-
-    await datasette.client.post(
-        f"/-/apps/{app['id']}/edit",
-        actor={"id": "alice"},
-        data={
-            "name": "Team app",
-            "description": "",
-            "html": "<h1>Team</h1>",
-            "access_mode": "specific",
-            "actor_ids": "bob\ncarol",
-            "sql_databases_present": "1",
-            "csp_origins": "",
-            "capability_grants": "{}",
-        },
-    )
-
-    bob = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "bob"})
-    mallory = await datasette.client.get(
-        f"/-/apps/{app['id']}", actor={"id": "mallory"}
-    )
-    assert bob.status_code == 200
-    assert mallory.status_code == 403

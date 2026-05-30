@@ -34,12 +34,12 @@ async def create_app_with_news_grant(datasette):
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_reads_from_allowed_database(tmp_path):
+async def test_datasette_query_reads_from_allowed_database(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))])
     app = await create_app_with_news_grant(datasette)
 
     response = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        f"/-/apps/{app['id']}/query",
         actor={"id": "alice"},
         content=json.dumps(
             {
@@ -60,14 +60,14 @@ async def test_datasette_query_capability_reads_from_allowed_database(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_allows_other_tables_in_allowed_database(
+async def test_datasette_query_allows_other_tables_in_allowed_database(
     tmp_path,
 ):
     datasette = Datasette([str(create_database(tmp_path))])
     app = await create_app_with_news_grant(datasette)
 
     response = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        f"/-/apps/{app['id']}/query",
         actor={"id": "alice"},
         content=json.dumps(
             {
@@ -88,12 +88,12 @@ async def test_datasette_query_capability_allows_other_tables_in_allowed_databas
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_denies_unallowed_database(tmp_path):
+async def test_datasette_query_denies_unallowed_database(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))], memory=True)
     app = await create_app_with_news_grant(datasette)
 
     response = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        f"/-/apps/{app['id']}/query",
         actor={"id": "alice"},
         content=json.dumps(
             {
@@ -109,12 +109,12 @@ async def test_datasette_query_capability_denies_unallowed_database(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_denies_writes(tmp_path):
+async def test_datasette_query_denies_writes(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))])
     app = await create_app_with_news_grant(datasette)
 
     response = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        f"/-/apps/{app['id']}/query",
         actor={"id": "alice"},
         content=json.dumps(
             {
@@ -130,12 +130,12 @@ async def test_datasette_query_capability_denies_writes(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_intersects_actor_permissions(tmp_path):
+async def test_datasette_query_intersects_actor_permissions(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))], default_deny=True)
     app = await create_app_with_news_grant(datasette)
 
     response = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        f"/-/apps/{app['id']}/query",
         actor={"id": "alice"},
         content=json.dumps(
             {
@@ -151,12 +151,12 @@ async def test_datasette_query_capability_intersects_actor_permissions(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_accepts_named_parameters(tmp_path):
+async def test_datasette_query_accepts_named_parameters(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))])
     app = await create_app_with_news_grant(datasette)
 
     response = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        f"/-/apps/{app['id']}/query",
         actor={"id": "alice"},
         json={
             "database": "content",
@@ -172,12 +172,12 @@ async def test_datasette_query_capability_accepts_named_parameters(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_datasette_query_capability_allows_granted_views(tmp_path):
+async def test_datasette_query_allows_granted_views(tmp_path):
     datasette = Datasette([str(create_database(tmp_path))])
     app = await create_app_with_news_grant(datasette)
 
     allowed = await datasette.client.post(
-        f"/-/apps/{app['id']}/capabilities/datasette.query",
+        f"/-/apps/{app['id']}/query",
         actor={"id": "alice"},
         json={"database": "content", "sql": "select title from recent_news"},
     )

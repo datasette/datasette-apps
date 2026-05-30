@@ -35,11 +35,11 @@ HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and 
 
 Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` origins configured, those same origins are allowed for remote images, external script tags, and external stylesheet links/style elements, and localhost origins are never allowed. Local file previews using `data:` and `blob:` image URLs are allowed.
 
-The iframe bridge reports JavaScript errors, unhandled promise rejections, CSP violations, failed resources, fetch failures, `console.error()` calls, and failed Datasette capability requests back to the parent page. The app page shows these in a small expandable error panel above the iframe.
+The iframe bridge reports JavaScript errors, unhandled promise rejections, CSP violations, failed resources, fetch failures, `console.error()` calls, and failed Datasette data queries back to the parent page. The app page shows these in a small expandable error panel above the iframe.
 
 The bridge also replaces `history.replaceState()`, `history.pushState()`, `history.back()`, `history.forward()`, and `history.go()` with no-op functions inside the sandboxed iframe, avoiding browser errors from apps that try to manage URL state.
 
-Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped capability endpoint. Apps have a simple SQL database allow-list configured on the edit page; if the requested database is allowed, the query is forwarded to Datasette's own read-only query JSON API using the current actor, so Datasette's normal SQL permissions still apply.
+Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped query endpoint. Apps have a simple SQL database allow-list configured on the edit page; if the requested database is allowed, the query is forwarded to Datasette's own read-only query JSON API using the current actor, so Datasette's normal SQL permissions still apply.
 
 The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can view, edit, and manage their own apps; external apps registered by plugins are visible to signed-in users by default.
 
@@ -51,9 +51,7 @@ The create page includes a copyable prompt for an LLM. The prompt explains the s
 
 The create and edit pages use Datasette's existing bundled CodeMirror editor for the HTML source textarea.
 
-Other plugins can expose server-backed capabilities to stored HTML apps by implementing `register_app_capabilities(datasette)` and returning `AppCapability` objects. Non-built-in capability grants are stored with raw JSON configuration in phase one.
-
-The edit page includes explicit controls for app access (private, signed-in users, or specific actor IDs), SQL query database access, allowed network origins, and raw JSON capability grants.
+The edit page includes explicit controls for app access (private or signed-in users), SQL query database access, and allowed network origins.
 
 Plugins can add their own apps to the central catalog during startup:
 
