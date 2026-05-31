@@ -151,6 +151,36 @@ async def test_edit_form_saves_sql_database_and_csp():
 
 
 @pytest.mark.asyncio
+async def test_edit_form_records_one_revision_for_one_save():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Controlled app",
+        description="",
+        html="<h1>Before</h1>",
+    )
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/edit",
+        actor={"id": "alice"},
+        data={
+            "name": "Controlled app",
+            "description": "",
+            "html": "<h1>After</h1>",
+            "is_private": "0",
+            "sql_databases_present": "1",
+            "csp_origins": "",
+        },
+    )
+
+    assert response.status_code == 302
+    revisions = await registry.list_versions(app["id"])
+    assert [revision["version"] for revision in revisions] == [2, 1]
+    assert revisions[0]["changed_fields"] == ["html", "is_private"]
+
+
+@pytest.mark.asyncio
 async def test_edit_form_not_private_access_mode_allows_actor_with_view_app():
     datasette = Datasette(
         memory=True,

@@ -57,6 +57,7 @@ async def test_create_view_and_edit_stored_app():
     assert view.status_code == 200
     assert "Hello app" in view.text
     assert "iframe" in view.text
+    assert 'sandbox="allow-scripts allow-forms"' in view.text
     assert "datasette-app-query" in view.text
     assert f"/-/apps/{app_id}/query" in view.text
     assert "window.datasette" in view.text
@@ -102,6 +103,16 @@ async def test_create_view_and_edit_stored_app():
     assert f"/-/apps/{app_id}/revisions/1" in edit_form.text
     assert ">v2</a>" in edit_form.text
     assert ">v1</a>" in edit_form.text
+    assert (
+        '<span class="datasette-app-revision-field-summary-label">Changed</span>'
+        in edit_form.text
+    )
+    assert '<ul class="datasette-app-revision-fields">' in edit_form.text
+    assert '<li class="datasette-app-revision-field">Description</li>' in edit_form.text
+    assert '<li class="datasette-app-revision-field">HTML</li>' in edit_form.text
+    v1_history = edit_form.text.split(">v1</a>", 1)[1].split("</li>", 1)[0]
+    assert "Created" in v1_history
+    assert '<ul class="datasette-app-revision-fields">' not in v1_history
     first_time_text = (
         edit_form.text.split("<time", 1)[1].split(">", 1)[1].split("</time>", 1)[0]
     )
@@ -132,6 +143,81 @@ async def test_create_view_and_edit_stored_app():
         f"/-/apps/{app_id}/revisions/99", actor={"id": "alice"}
     )
     assert missing_revision.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_revision_pages_show_non_html_changes_without_empty_diff():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Hello app",
+        description="Initial",
+        html="<h1>Hello</h1>",
+    )
+
+    await registry.set_access_mode(app["id"], "not-private", actor_id="alice")
+    await registry.set_sql_databases(app["id"], ["_memory"], actor_id="alice")
+    await registry.set_csp_origins(
+        app["id"], ["https://api.github.com"], actor_id="alice"
+    )
+    await registry.update_stored_app(
+        app["id"],
+        "Renamed app",
+        "Updated description",
+        "<h1>Hello</h1>",
+        actor_id="alice",
+    )
+
+    async def assert_settings_revision(version, expected):
+        response = await datasette.client.get(
+            f"/-/apps/{app['id']}/revisions/{version}", actor={"id": "alice"}
+        )
+        assert response.status_code == 200
+        assert "Changes" in response.text
+        for text in expected:
+            assert text in response.text
+        assert "HTML diff" not in response.text
+        assert 'class="datasette-app-diff"' not in response.text
+        assert "Copy to clipboard" not in response.text
+        assert 'id="revision-html-source"' not in response.text
+        assert "cm.editorFromTextArea" not in response.text
+
+    await assert_settings_revision(
+        2,
+        [
+            "Privacy",
+            "Private",
+            "Not private",
+        ],
+    )
+    await assert_settings_revision(
+        3,
+        [
+            "Read-only data access",
+            'datasette-app-revision-empty-value">- unset -</span>',
+            "_memory",
+        ],
+    )
+    await assert_settings_revision(
+        4,
+        [
+            "Network access",
+            'datasette-app-revision-empty-value">- unset -</span>',
+            "https://api.github.com",
+        ],
+    )
+    await assert_settings_revision(
+        5,
+        [
+            "Name",
+            "Hello app",
+            "Renamed app",
+            "Description",
+            "Initial",
+            "Updated description",
+        ],
+    )
 
 
 @pytest.mark.asyncio

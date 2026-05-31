@@ -8,7 +8,14 @@
 {% endblock %}
 
 {% block extra_head %}
+<style>
+.datasette-app-revision-empty-value {
+  color: rgba(17, 26, 53, 0.5);
+}
+</style>
+{% if html_changed %}
 {{ codemirror_assets|safe }}
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -29,8 +36,32 @@
   {% endif %}
 </p>
 
+{% if revision_changes %}
 <section class="datasette-app-revision-section">
-  <h2>Diff</h2>
+  <h2>Changes</h2>
+  <dl class="datasette-app-revision-changes">
+    {% for change in revision_changes %}
+      <div>
+        <dt>{{ change.label }}</dt>
+        <dd>
+          <span>
+            <span class="datasette-app-revision-change-label">Before</span>
+            <span class="datasette-app-revision-change-value{% if change.before.empty %} datasette-app-revision-empty-value{% endif %}">{{ change.before.text }}</span>
+          </span>
+          <span>
+            <span class="datasette-app-revision-change-label">After</span>
+            <span class="datasette-app-revision-change-value{% if change.after.empty %} datasette-app-revision-empty-value{% endif %}">{{ change.after.text }}</span>
+          </span>
+        </dd>
+      </div>
+    {% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+{% if html_changed %}
+<section class="datasette-app-revision-section">
+  <h2>HTML diff</h2>
   <pre class="datasette-app-diff">{%- for line in diff_lines -%}<span{% if line.class %} class="{{ line.class }}"{% endif %}>{{ line.text }}</span>{%- endfor -%}</pre>
 </section>
 
@@ -72,4 +103,5 @@ document.addEventListener("click", async function(event) {
   }, 2000);
 });
 </script>
+{% endif %}
 {% endblock %}

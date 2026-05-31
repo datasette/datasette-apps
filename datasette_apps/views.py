@@ -132,6 +132,49 @@ def _revision_diff_lines(previous, version):
     return diff_lines
 
 
+_REVISION_FIELD_LABELS = {
+    "name": "Name",
+    "description": "Description",
+    "html": "HTML",
+    "is_private": "Privacy",
+    "sql_databases": "Read-only data access",
+    "csp_origins": "Network access",
+}
+
+
+def _revision_value_for_display(field, value):
+    if field == "is_private" and value is not None:
+        return {"text": "Private" if value else "Not private", "empty": False}
+    if field in {"sql_databases", "csp_origins"}:
+        value = "\n".join(value) if value else ""
+    if value in {None, ""}:
+        return {"text": "- unset -", "empty": True}
+    return {"text": str(value), "empty": False}
+
+
+def _revision_changes(previous, version):
+    changes = []
+    for field in version["changed_fields"]:
+        if field == "html":
+            continue
+        changes.append(
+            {
+                "label": _REVISION_FIELD_LABELS[field],
+                "before": _revision_value_for_display(
+                    field, previous[field] if previous else None
+                ),
+                "after": _revision_value_for_display(field, version[field]),
+            }
+        )
+    return changes
+
+
+def _revision_field_labels(version):
+    return [
+        _REVISION_FIELD_LABELS.get(field, field) for field in version["changed_fields"]
+    ]
+
+
 async def _selected_sql_databases(datasette, actor, post):
     visible_database_names = set(await _visible_database_names(datasette, actor))
     return [
@@ -224,21 +267,23 @@ async def create_app(datasette, request):
 
     post = await request.form()
     registry = Registry(datasette)
+    actor_id = _actor_id(actor)
+    access_mode = _access_mode_from_post(post) or "private"
+    sql_databases = []
+    if "sql_databases_present" in post:
+        sql_databases = await _selected_sql_databases(datasette, actor, post)
+    csp_origins = []
+    if "csp_origins" in post:
+        csp_origins = _csp_origins_from_post(post)
     app = await registry.create_stored_app(
-        actor_id=_actor_id(actor),
+        actor_id=actor_id,
         name=post.get("name") or "Untitled app",
         description=post.get("description") or "",
         html=post.get("html") or "",
+        is_private=access_mode == "private",
+        sql_databases=sql_databases,
+        csp_origins=csp_origins,
     )
-    access_mode = _access_mode_from_post(post)
-    if access_mode:
-        await registry.set_access_mode(app["id"], access_mode)
-    if "sql_databases_present" in post:
-        await registry.set_sql_databases(
-            app["id"], await _selected_sql_databases(datasette, actor, post)
-        )
-    if "csp_origins" in post:
-        await registry.set_csp_origins(app["id"], _csp_origins_from_post(post))
     return Response.redirect(app["path"])
 
 
@@ -289,7 +334,14 @@ async def edit_app(datasette, request):
     await _ensure_app_permission(datasette, actor, "edit-app", app_id)
     if request.method == "GET":
         version = await registry.get_current_version(app_id)
-        revisions = await registry.list_versions(app_id)
+        revisions = []
+        for revision in await registry.list_versions(app_id):
+            revision = dict(revision)
+            revision["created_revision"] = revision["version"] == 1
+            revision["changed_field_labels"] = (
+                [] if revision["created_revision"] else _revision_field_labels(revision)
+            )
+            revisions.append(revision)
         access_mode = await registry.get_access_mode(app_id)
         sql_databases = set(await registry.get_sql_databases(app_id))
         sql_database_options = [
@@ -314,21 +366,25 @@ async def edit_app(datasette, request):
         )
 
     post = await request.form()
+    actor_id = _actor_id(actor)
+    access_mode = _access_mode_from_post(post)
+    update_kwargs = {}
+    if access_mode:
+        update_kwargs["is_private"] = access_mode == "private"
+    if "sql_databases_present" in post:
+        update_kwargs["sql_databases"] = await _selected_sql_databases(
+            datasette, actor, post
+        )
+    if "csp_origins" in post:
+        update_kwargs["csp_origins"] = _csp_origins_from_post(post)
     await registry.update_stored_app(
         app_id,
         post.get("name") or app["name"],
         post.get("description") or "",
         post.get("html") or "",
+        actor_id=actor_id,
+        **update_kwargs,
     )
-    access_mode = _access_mode_from_post(post)
-    if access_mode:
-        await registry.set_access_mode(app_id, access_mode)
-    if "sql_databases_present" in post:
-        await registry.set_sql_databases(
-            app_id, await _selected_sql_databases(datasette, actor, post)
-        )
-    if "csp_origins" in post:
-        await registry.set_csp_origins(app_id, _csp_origins_from_post(post))
     return Response.redirect(f"/-/apps/{app_id}")
 
 
@@ -347,6 +403,7 @@ async def app_revision(datasette, request):
     previous = None
     if revision_number > 1:
         previous = await registry.get_version(app_id, revision_number - 1)
+    html_changed = "html" in version["changed_fields"]
     return Response.html(
         await datasette.render_template(
             "app_revision.html",
@@ -354,7 +411,11 @@ async def app_revision(datasette, request):
                 "app": app,
                 "version": version,
                 "previous": previous,
-                "diff_lines": _revision_diff_lines(previous, version),
+                "html_changed": html_changed,
+                "revision_changes": _revision_changes(previous, version),
+                "diff_lines": (
+                    _revision_diff_lines(previous, version) if html_changed else []
+                ),
                 "codemirror_assets": _readonly_codemirror_assets(
                     "textarea#revision-html-source"
                 ),

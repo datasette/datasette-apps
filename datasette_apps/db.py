@@ -18,12 +18,20 @@ CREATE TABLE IF NOT EXISTS apps (
     CHECK (is_private IN (0, 1))
 );
 
-CREATE TABLE IF NOT EXISTS app_versions (
+CREATE TABLE IF NOT EXISTS app_revisions (
     app_id TEXT NOT NULL REFERENCES apps(id),
     version INTEGER NOT NULL,
-    html TEXT NOT NULL,
+    actor_id TEXT,
+    name TEXT,
+    description TEXT,
+    html TEXT,
+    is_private INTEGER,
+    sql_databases TEXT,
+    csp_origins TEXT,
+    changed_fields TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
-    PRIMARY KEY (app_id, version)
+    PRIMARY KEY (app_id, version),
+    CHECK (is_private IN (0, 1) OR is_private IS NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_apps_updated ON apps(updated_at DESC, id);
@@ -137,6 +145,193 @@ async def ensure_tables(datasette):
                               AND allow = 1
                         )
                         """)
+        if "apps" in existing_tables:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_sql_databases (
+                    app_id TEXT NOT NULL REFERENCES apps(id),
+                    database_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (app_id, database_name)
+                )
+                """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_csp_origins (
+                    id INTEGER PRIMARY KEY,
+                    app_id TEXT NOT NULL REFERENCES apps(id),
+                    directive TEXT NOT NULL DEFAULT 'connect-src',
+                    origin TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CHECK (directive IN ('connect-src')),
+                    UNIQUE (app_id, directive, origin)
+                )
+                """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_revisions (
+                    app_id TEXT NOT NULL REFERENCES apps(id),
+                    version INTEGER NOT NULL,
+                    actor_id TEXT,
+                    name TEXT,
+                    description TEXT,
+                    html TEXT,
+                    is_private INTEGER,
+                    sql_databases TEXT,
+                    csp_origins TEXT,
+                    changed_fields TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (app_id, version),
+                    CHECK (is_private IN (0, 1) OR is_private IS NULL)
+                )
+                """)
+        if "apps" in existing_tables and "app_versions" in existing_tables:
+            conn.execute("""
+                INSERT INTO app_revisions (
+                    app_id, version, actor_id, name, description, html,
+                    is_private, sql_databases, csp_origins, changed_fields,
+                    created_at
+                )
+                SELECT
+                    apps.id,
+                    1,
+                    apps.actor_id,
+                    apps.name,
+                    apps.description,
+                    COALESCE(
+                        (
+                            SELECT app_versions.html
+                            FROM app_versions
+                            WHERE app_versions.app_id = apps.id
+                              AND app_versions.version = apps.current_version
+                            LIMIT 1
+                        ),
+                        (
+                            SELECT app_versions.html
+                            FROM app_versions
+                            WHERE app_versions.app_id = apps.id
+                            ORDER BY app_versions.version DESC
+                            LIMIT 1
+                        ),
+                        ''
+                    ),
+                    apps.is_private,
+                    COALESCE(
+                        (
+                            SELECT json_group_array(database_name)
+                            FROM (
+                                SELECT database_name
+                                FROM app_sql_databases
+                                WHERE app_sql_databases.app_id = apps.id
+                                ORDER BY database_name
+                            )
+                        ),
+                        '[]'
+                    ),
+                    COALESCE(
+                        (
+                            SELECT json_group_array(origin)
+                            FROM (
+                                SELECT origin
+                                FROM app_csp_origins
+                                WHERE app_csp_origins.app_id = apps.id
+                                  AND directive = 'connect-src'
+                                ORDER BY origin
+                            )
+                        ),
+                        '[]'
+                    ),
+                    '["name", "description", "html", "is_private", "sql_databases", "csp_origins"]',
+                    apps.updated_at
+                FROM apps
+                WHERE apps.external = 0
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM app_revisions
+                      WHERE app_revisions.app_id = apps.id
+                  )
+                """)
+            conn.execute("""
+                UPDATE app_revisions
+                SET html = (
+                    SELECT app_versions.html
+                    FROM app_versions
+                    WHERE app_versions.app_id = app_revisions.app_id
+                    ORDER BY app_versions.version DESC
+                    LIMIT 1
+                )
+                WHERE version = 1
+                  AND (html IS NULL OR html = '')
+                  AND EXISTS (
+                      SELECT 1
+                      FROM app_versions
+                      WHERE app_versions.app_id = app_revisions.app_id
+                        AND app_versions.html != ''
+                  )
+                """)
+            conn.execute("UPDATE apps SET current_version = 1 WHERE external = 0")
+        if "apps" in existing_tables:
+            conn.execute("""
+            INSERT INTO app_revisions (
+                app_id, version, actor_id, name, description, html,
+                is_private, sql_databases, csp_origins, changed_fields,
+                created_at
+            )
+            SELECT
+                apps.id,
+                1,
+                apps.actor_id,
+                apps.name,
+                apps.description,
+                '',
+                apps.is_private,
+                COALESCE(
+                    (
+                        SELECT json_group_array(database_name)
+                        FROM (
+                            SELECT database_name
+                            FROM app_sql_databases
+                            WHERE app_sql_databases.app_id = apps.id
+                            ORDER BY database_name
+                        )
+                    ),
+                    '[]'
+                ),
+                COALESCE(
+                    (
+                        SELECT json_group_array(origin)
+                        FROM (
+                            SELECT origin
+                            FROM app_csp_origins
+                            WHERE app_csp_origins.app_id = apps.id
+                              AND directive = 'connect-src'
+                            ORDER BY origin
+                        )
+                    ),
+                    '[]'
+                ),
+                '["name", "description", "html", "is_private", "sql_databases", "csp_origins"]',
+                apps.updated_at
+            FROM apps
+            WHERE apps.external = 0
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM app_revisions
+                  WHERE app_revisions.app_id = apps.id
+              )
+            """)
+            conn.execute("""
+            UPDATE apps
+            SET current_version = 1
+            WHERE external = 0
+              AND current_version IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM app_revisions
+                  WHERE app_revisions.app_id = apps.id
+                    AND app_revisions.version = apps.current_version
+              )
+            """)
+        conn.execute("DROP TABLE IF EXISTS app_versions")
         conn.executescript(SCHEMA)
 
     await internal_db.execute_write_fn(create_schema)

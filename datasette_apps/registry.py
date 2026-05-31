@@ -36,7 +36,96 @@ def _row_to_state(row):
 def _row_to_version(row):
     if row is None:
         return None
-    return dict(row)
+    version = dict(row)
+    version["changed_fields"] = _decode_json(version.get("changed_fields"), [])
+    version["sql_databases"] = _decode_json(version.get("sql_databases"), [])
+    version["csp_origins"] = _decode_json(version.get("csp_origins"), [])
+    if version.get("revision_sql_databases") is not None:
+        version["revision_sql_databases"] = _decode_json(
+            version["revision_sql_databases"], []
+        )
+    if version.get("revision_csp_origins") is not None:
+        version["revision_csp_origins"] = _decode_json(
+            version["revision_csp_origins"], []
+        )
+    return version
+
+
+APP_REVISION_VALUE_FIELDS = (
+    "name",
+    "description",
+    "html",
+    "is_private",
+    "sql_databases",
+    "csp_origins",
+)
+
+APP_REVISION_CHANGED_FIELDS = [
+    "name",
+    "description",
+    "html",
+    "is_private",
+    "sql_databases",
+    "csp_origins",
+]
+
+_UNSET = object()
+
+
+def _revision_db_value(field, value):
+    if field in {"sql_databases", "csp_origins"}:
+        return json.dumps(value, sort_keys=True)
+    if field == "is_private":
+        return int(bool(value))
+    return value
+
+
+def _insert_revision(conn, app_id, changes, now, actor_id=None):
+    if not changes:
+        return None
+    row = conn.execute(
+        "SELECT current_version FROM apps WHERE id = ?", (app_id,)
+    ).fetchone()
+    next_version = int(row["current_version"] or 0) + 1
+    changed_fields = [
+        field for field in APP_REVISION_CHANGED_FIELDS if field in changes
+    ]
+    values = {
+        field: _revision_db_value(field, changes[field]) if field in changes else None
+        for field in APP_REVISION_VALUE_FIELDS
+    }
+    conn.execute(
+        """
+        INSERT INTO app_revisions (
+            app_id, version, actor_id, name, description, html, is_private,
+            sql_databases, csp_origins, changed_fields, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            app_id,
+            next_version,
+            actor_id,
+            values["name"],
+            values["description"],
+            values["html"],
+            values["is_private"],
+            values["sql_databases"],
+            values["csp_origins"],
+            json.dumps(changed_fields),
+            now,
+        ),
+    )
+    conn.execute(
+        """
+        UPDATE apps
+        SET current_version = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (next_version, now, app_id),
+    )
+    return next_version
 
 
 def _fts_query(q):
@@ -66,11 +155,72 @@ APP_COLUMNS = """
     apps.updated_at
 """
 
-APP_VERSION_COLUMNS = """
-    app_versions.app_id,
-    app_versions.version,
-    app_versions.html,
-    app_versions.created_at
+APP_REVISION_RESOLVED_COLUMNS = """
+    app_revisions.app_id,
+    app_revisions.version,
+    app_revisions.actor_id,
+    app_revisions.name AS revision_name,
+    app_revisions.description AS revision_description,
+    app_revisions.html AS revision_html,
+    app_revisions.is_private AS revision_is_private,
+    app_revisions.sql_databases AS revision_sql_databases,
+    app_revisions.csp_origins AS revision_csp_origins,
+    app_revisions.changed_fields,
+    app_revisions.created_at,
+    (
+        SELECT previous.name
+        FROM app_revisions AS previous
+        WHERE previous.app_id = app_revisions.app_id
+          AND previous.version <= app_revisions.version
+          AND previous.name IS NOT NULL
+        ORDER BY previous.version DESC
+        LIMIT 1
+    ) AS name,
+    (
+        SELECT previous.description
+        FROM app_revisions AS previous
+        WHERE previous.app_id = app_revisions.app_id
+          AND previous.version <= app_revisions.version
+          AND previous.description IS NOT NULL
+        ORDER BY previous.version DESC
+        LIMIT 1
+    ) AS description,
+    (
+        SELECT previous.html
+        FROM app_revisions AS previous
+        WHERE previous.app_id = app_revisions.app_id
+          AND previous.version <= app_revisions.version
+          AND previous.html IS NOT NULL
+        ORDER BY previous.version DESC
+        LIMIT 1
+    ) AS html,
+    (
+        SELECT previous.is_private
+        FROM app_revisions AS previous
+        WHERE previous.app_id = app_revisions.app_id
+          AND previous.version <= app_revisions.version
+          AND previous.is_private IS NOT NULL
+        ORDER BY previous.version DESC
+        LIMIT 1
+    ) AS is_private,
+    (
+        SELECT previous.sql_databases
+        FROM app_revisions AS previous
+        WHERE previous.app_id = app_revisions.app_id
+          AND previous.version <= app_revisions.version
+          AND previous.sql_databases IS NOT NULL
+        ORDER BY previous.version DESC
+        LIMIT 1
+    ) AS sql_databases,
+    (
+        SELECT previous.csp_origins
+        FROM app_revisions AS previous
+        WHERE previous.app_id = app_revisions.app_id
+          AND previous.version <= app_revisions.version
+          AND previous.csp_origins IS NOT NULL
+        ORDER BY previous.version DESC
+        LIMIT 1
+    ) AS csp_origins
 """
 
 APP_USER_STATE_COLUMNS = """
@@ -147,10 +297,26 @@ class Registry:
                 metadata=app.get("metadata") or {},
             )
 
-    async def create_stored_app(self, actor_id, name, description, html):
+    async def create_stored_app(
+        self,
+        actor_id,
+        name,
+        description,
+        html,
+        is_private=True,
+        sql_databases=None,
+        csp_origins=None,
+    ):
         await self.ensure_tables()
         app_id = monotonic_ulid()
         now = _now()
+        sql_databases = sorted(dict.fromkeys(sql_databases or []))
+        csp_origins = sorted(
+            dict.fromkeys(
+                normalize_connect_origin(origin) for origin in csp_origins or []
+            )
+        )
+        is_private = int(bool(is_private))
 
         def create(conn):
             conn.execute(
@@ -159,7 +325,7 @@ class Registry:
                     id, external, name, description, path, source, metadata,
                     actor_id, is_private, current_version, created_at, updated_at
                 )
-                VALUES (?, 0, ?, ?, ?, 'datasette-apps', '{}', ?, 1, 1, ?, ?)
+                VALUES (?, 0, ?, ?, ?, 'datasette-apps', '{}', ?, ?, 1, ?, ?)
                 """,
                 (
                     app_id,
@@ -167,49 +333,202 @@ class Registry:
                     description or "",
                     f"/-/apps/{app_id}",
                     actor_id,
+                    is_private,
                     now,
                     now,
                 ),
             )
             conn.execute(
                 """
-                INSERT INTO app_versions (app_id, version, html, created_at)
-                VALUES (?, 1, ?, ?)
+                INSERT INTO app_revisions (
+                    app_id, version, actor_id, name, description, html,
+                    is_private, sql_databases, csp_origins, changed_fields,
+                    created_at
+                )
+                VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (app_id, html, now),
+                (
+                    app_id,
+                    actor_id,
+                    name,
+                    description or "",
+                    html,
+                    is_private,
+                    json.dumps(sql_databases),
+                    json.dumps(csp_origins),
+                    json.dumps(APP_REVISION_CHANGED_FIELDS),
+                    now,
+                ),
+            )
+            conn.executemany(
+                """
+                INSERT INTO app_sql_databases (
+                    app_id, database_name, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                [(app_id, database_name, now, now) for database_name in sql_databases],
+            )
+            conn.executemany(
+                """
+                INSERT INTO app_csp_origins (
+                    app_id, directive, origin, created_at, updated_at
+                )
+                VALUES (?, 'connect-src', ?, ?, ?)
+                """,
+                [(app_id, origin, now, now) for origin in csp_origins],
             )
 
         await self.db.execute_write_fn(create)
         return await self.get_app(app_id)
 
-    async def update_stored_app(self, app_id, name, description, html):
+    async def update_stored_app(
+        self,
+        app_id,
+        name,
+        description,
+        html,
+        actor_id=None,
+        *,
+        is_private=_UNSET,
+        sql_databases=_UNSET,
+        csp_origins=_UNSET,
+    ):
         await self.ensure_tables()
         now = _now()
+        description = description or ""
+        if is_private is not _UNSET:
+            is_private = int(bool(is_private))
+        if sql_databases is not _UNSET:
+            sql_databases = sorted(dict.fromkeys(sql_databases))
+        if csp_origins is not _UNSET:
+            csp_origins = sorted(
+                dict.fromkeys(
+                    normalize_connect_origin(origin) for origin in csp_origins
+                )
+            )
 
         def save(conn):
             row = conn.execute(
-                "SELECT current_version, external FROM apps WHERE id = ?", (app_id,)
+                """
+                SELECT current_version, external, name, description, is_private
+                FROM apps
+                WHERE id = ?
+                """,
+                (app_id,),
             ).fetchone()
             if row is None:
                 raise KeyError(app_id)
             if row["external"]:
                 raise ValueError("External apps cannot be edited by datasette-apps")
-            next_version = int(row["current_version"] or 0) + 1
-            conn.execute(
+            current_html_row = conn.execute(
                 """
-                INSERT INTO app_versions (app_id, version, html, created_at)
-                VALUES (?, ?, ?, ?)
+                SELECT html
+                FROM app_revisions
+                WHERE app_id = ?
+                  AND html IS NOT NULL
+                ORDER BY version DESC
+                LIMIT 1
                 """,
-                (app_id, next_version, html, now),
-            )
-            conn.execute(
-                """
-                UPDATE apps
-                SET name = ?, description = ?, current_version = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (name, description or "", next_version, now, app_id),
-            )
+                (app_id,),
+            ).fetchone()
+            changes = {}
+            if name != row["name"]:
+                changes["name"] = name
+            if description != row["description"]:
+                changes["description"] = description
+            if html != (current_html_row["html"] if current_html_row else None):
+                changes["html"] = html
+            if is_private is not _UNSET and is_private != row["is_private"]:
+                changes["is_private"] = is_private
+            if sql_databases is not _UNSET:
+                current_sql_databases = [
+                    current_row["database_name"]
+                    for current_row in conn.execute(
+                        """
+                        SELECT database_name
+                        FROM app_sql_databases
+                        WHERE app_id = ?
+                        ORDER BY database_name
+                        """,
+                        (app_id,),
+                    ).fetchall()
+                ]
+                if current_sql_databases != sql_databases:
+                    changes["sql_databases"] = sql_databases
+            if csp_origins is not _UNSET:
+                current_csp_origins = [
+                    current_row["origin"]
+                    for current_row in conn.execute(
+                        """
+                        SELECT origin
+                        FROM app_csp_origins
+                        WHERE app_id = ? AND directive = 'connect-src'
+                        ORDER BY origin
+                        """,
+                        (app_id,),
+                    ).fetchall()
+                ]
+                if current_csp_origins != csp_origins:
+                    changes["csp_origins"] = csp_origins
+            if not changes:
+                return
+            if "sql_databases" in changes:
+                conn.execute(
+                    "DELETE FROM app_sql_databases WHERE app_id = ?", (app_id,)
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO app_sql_databases (
+                        app_id, database_name, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    [
+                        (app_id, database_name, now, now)
+                        for database_name in sql_databases
+                    ],
+                )
+            if "csp_origins" in changes:
+                conn.execute(
+                    """
+                    DELETE FROM app_csp_origins
+                    WHERE app_id = ? AND directive = 'connect-src'
+                    """,
+                    (app_id,),
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO app_csp_origins (
+                        app_id, directive, origin, created_at, updated_at
+                    )
+                    VALUES (?, 'connect-src', ?, ?, ?)
+                    """,
+                    [(app_id, origin, now, now) for origin in csp_origins],
+                )
+            _insert_revision(conn, app_id, changes, now, actor_id=actor_id)
+            if {
+                "name",
+                "description",
+                "is_private",
+            } & changes.keys():
+                conn.execute(
+                    """
+                    UPDATE apps
+                    SET name = ?,
+                        description = ?,
+                        is_private = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        name,
+                        description,
+                        is_private if is_private is not _UNSET else row["is_private"],
+                        now,
+                        app_id,
+                    ),
+                )
 
         await self.db.execute_write_fn(save)
 
@@ -217,11 +536,11 @@ class Registry:
         await self.ensure_tables()
         result = await self.db.execute(
             f"""
-            SELECT {APP_VERSION_COLUMNS}
-            FROM app_versions
-            JOIN apps ON apps.id = app_versions.app_id
+            SELECT {APP_REVISION_RESOLVED_COLUMNS}
+            FROM app_revisions
+            JOIN apps ON apps.id = app_revisions.app_id
             WHERE apps.id = :app_id
-              AND app_versions.version = apps.current_version
+              AND app_revisions.version = apps.current_version
             """,
             {"app_id": app_id},
         )
@@ -231,12 +550,12 @@ class Registry:
         await self.ensure_tables()
         result = await self.db.execute(
             f"""
-            SELECT {APP_VERSION_COLUMNS}
-            FROM app_versions
-            JOIN apps ON apps.id = app_versions.app_id
+            SELECT {APP_REVISION_RESOLVED_COLUMNS}
+            FROM app_revisions
+            JOIN apps ON apps.id = app_revisions.app_id
             WHERE apps.id = :app_id
               AND apps.external = 0
-              AND app_versions.version = :version
+              AND app_revisions.version = :version
             """,
             {"app_id": app_id, "version": version},
         )
@@ -246,12 +565,12 @@ class Registry:
         await self.ensure_tables()
         result = await self.db.execute(
             f"""
-            SELECT {APP_VERSION_COLUMNS}
-            FROM app_versions
-            JOIN apps ON apps.id = app_versions.app_id
+            SELECT {APP_REVISION_RESOLVED_COLUMNS}
+            FROM app_revisions
+            JOIN apps ON apps.id = app_revisions.app_id
             WHERE apps.id = :app_id
               AND apps.external = 0
-            ORDER BY app_versions.version DESC
+            ORDER BY app_revisions.version DESC
             """,
             {"app_id": app_id},
         )
@@ -410,12 +729,28 @@ class Registry:
         )
         return [row["origin"] for row in result.rows]
 
-    async def set_csp_origins(self, app_id, origins, directive="connect-src"):
+    async def set_csp_origins(
+        self, app_id, origins, directive="connect-src", actor_id=None
+    ):
         await self.ensure_tables()
         normalized = [normalize_connect_origin(origin) for origin in origins]
         now = _now()
 
         def save(conn):
+            current = [
+                row["origin"]
+                for row in conn.execute(
+                    """
+                    SELECT origin
+                    FROM app_csp_origins
+                    WHERE app_id = ? AND directive = ?
+                    ORDER BY origin
+                    """,
+                    (app_id, directive),
+                ).fetchall()
+            ]
+            if current == normalized:
+                return
             conn.execute(
                 """
                 DELETE FROM app_csp_origins
@@ -431,6 +766,13 @@ class Registry:
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 [(app_id, directive, origin, now, now) for origin in normalized],
+            )
+            _insert_revision(
+                conn,
+                app_id,
+                {"csp_origins": normalized},
+                now,
+                actor_id=actor_id,
             )
 
         await self.db.execute_write_fn(save)
@@ -448,12 +790,26 @@ class Registry:
         )
         return [row["database_name"] for row in result.rows]
 
-    async def set_sql_databases(self, app_id, database_names):
+    async def set_sql_databases(self, app_id, database_names, actor_id=None):
         await self.ensure_tables()
         now = _now()
         database_names = sorted(dict.fromkeys(database_names))
 
         def save(conn):
+            current = [
+                row["database_name"]
+                for row in conn.execute(
+                    """
+                    SELECT database_name
+                    FROM app_sql_databases
+                    WHERE app_id = ?
+                    ORDER BY database_name
+                    """,
+                    (app_id,),
+                ).fetchall()
+            ]
+            if current == database_names:
+                return
             conn.execute("DELETE FROM app_sql_databases WHERE app_id = ?", (app_id,))
             conn.executemany(
                 """
@@ -463,6 +819,13 @@ class Registry:
                 VALUES (?, ?, ?, ?)
                 """,
                 [(app_id, database_name, now, now) for database_name in database_names],
+            )
+            _insert_revision(
+                conn,
+                app_id,
+                {"sql_databases": database_names},
+                now,
+                actor_id=actor_id,
             )
 
         await self.db.execute_write_fn(save)
@@ -480,21 +843,36 @@ class Registry:
         row = result.first()
         return "private" if row is None or row["is_private"] else "not-private"
 
-    async def set_access_mode(self, app_id, mode):
+    async def set_access_mode(self, app_id, mode, actor_id=None):
         if mode not in {"private", "not-private"}:
             raise ValueError("Unknown app access mode")
         await self.ensure_tables()
         now = _now()
-        await self.db.execute_write(
-            """
-            UPDATE apps
-            SET is_private = :is_private,
-                updated_at = :updated_at
-            WHERE id = :app_id
-            """,
-            {
-                "app_id": app_id,
-                "is_private": 1 if mode == "private" else 0,
-                "updated_at": now,
-            },
-        )
+
+        def save(conn):
+            is_private = 1 if mode == "private" else 0
+            row = conn.execute(
+                "SELECT is_private FROM apps WHERE id = ?", (app_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(app_id)
+            if row["is_private"] == is_private:
+                return
+            conn.execute(
+                """
+                UPDATE apps
+                SET is_private = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (is_private, now, app_id),
+            )
+            _insert_revision(
+                conn,
+                app_id,
+                {"is_private": is_private},
+                now,
+                actor_id=actor_id,
+            )
+
+        await self.db.execute_write_fn(save)

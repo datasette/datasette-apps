@@ -8,6 +8,39 @@
 {% endblock %}
 
 {% block extra_head %}
+<style>
+.datasette-app-revision-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.datasette-app-revision-field-summary {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+}
+
+.datasette-app-revision-field-summary-label {
+  color: rgba(17, 26, 53, 0.72);
+  font-size: 0.85rem;
+}
+
+.datasette-app-revision-field {
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  color: rgba(17, 26, 53, 0.78);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  padding: 0.12rem 0.32rem;
+}
+</style>
 {{ codemirror_assets|safe }}
 {% endblock %}
 
@@ -88,6 +121,20 @@
           <strong>current</strong>
         {% endif %}
         <time datetime="{{ revision.created_at }}">{{ revision.created_at[:19]|replace("T", " ") }}</time>
+        {% if revision.created_revision %}
+          <div class="datasette-app-revision-field-summary">
+            <span class="datasette-app-revision-field-summary-label">Created</span>
+          </div>
+        {% elif revision.changed_field_labels %}
+          <div class="datasette-app-revision-field-summary">
+            <span class="datasette-app-revision-field-summary-label">Changed</span>
+            <ul class="datasette-app-revision-fields">
+              {% for field_label in revision.changed_field_labels %}
+                <li class="datasette-app-revision-field">{{ field_label }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
       </li>
     {% endfor %}
   </ol>

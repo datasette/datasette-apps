@@ -386,8 +386,81 @@
   margin-top: 0.1rem;
 }
 
+.datasette-app-revision-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.datasette-app-revision-field-summary {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+}
+
+.datasette-app-revision-field-summary-label {
+  color: rgba(17, 26, 53, 0.72);
+  font-size: 0.85rem;
+}
+
+.datasette-app-revision-field {
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  color: rgba(17, 26, 53, 0.78);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  padding: 0.12rem 0.32rem;
+}
+
 .datasette-app-revision-section {
   margin: 1.5rem 0 2rem;
+}
+
+.datasette-app-revision-changes {
+  border-top: 1px solid #ddd;
+  margin: 0;
+  max-width: 900px;
+}
+
+.datasette-app-revision-changes > div {
+  border-bottom: 1px solid #ddd;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(10rem, 14rem) 1fr;
+  padding: 0.85rem 0;
+}
+
+.datasette-app-revision-changes dt {
+  font-weight: 600;
+}
+
+.datasette-app-revision-changes dd {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.datasette-app-revision-change-label {
+  color: rgba(17, 26, 53, 0.72);
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 0.2rem;
+}
+
+.datasette-app-revision-change-value {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.datasette-app-revision-empty-value {
+  color: rgba(17, 26, 53, 0.5);
 }
 
 .datasette-app-revision-source-header {
@@ -425,6 +498,13 @@
 .datasette-app-diff {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+@media (max-width: 700px) {
+  .datasette-app-revision-changes > div,
+  .datasette-app-revision-changes dd {
+    grid-template-columns: 1fr;
+  }
 }
 
 .datasette-app-source {
