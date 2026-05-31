@@ -41,7 +41,17 @@ The bridge also replaces `history.replaceState()`, `history.pushState()`, `histo
 
 Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped query endpoint. Apps have a simple SQL database allow-list configured on the edit page; if the requested database is allowed, the query is forwarded to Datasette's own read-only query JSON API using the current actor, so Datasette's normal SQL permissions still apply.
 
-The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can view, edit, and manage their own apps; external apps registered by plugins are visible to signed-in users by default.
+The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can always view, edit, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
+
+Apps that are not private can be viewed by actors with the `view-app` permission. To let all signed-in users view all non-private apps, configure:
+
+```yaml
+permissions:
+  view-app:
+    id: "*"
+```
+
+External apps registered by plugins are not private by default, so they also require `view-app` permission unless the registering plugin supplies its own permission rules.
 
 Signed-in users can pin apps from the catalog and from individual stored app pages. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
 
@@ -51,7 +61,7 @@ The create page includes a copyable prompt for an LLM. The prompt explains the s
 
 The create and edit pages use Datasette's existing bundled CodeMirror editor for the HTML source textarea.
 
-The edit page includes explicit controls for app access (private or signed-in users), SQL query database access, and allowed network origins.
+The edit page includes a private checkbox, SQL query database access, and allowed network origins.
 
 Plugins can add their own apps to the central catalog during startup:
 

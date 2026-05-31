@@ -26,6 +26,7 @@ async def test_registry_add_get_list_and_remove_external_app():
     assert app["path"] == "/-/plugin-app"
     assert app["source"] == "myplugin"
     assert app["metadata"] == {"color": "blue"}
+    assert app["is_private"] == 0
 
     apps = await registry.list_apps()
     assert [app["id"] for app in apps] == ["myplugin:one"]
@@ -125,6 +126,7 @@ async def test_registry_create_stored_app_and_save_versions():
     assert app["path"] == f"/-/apps/{app['id']}"
     assert app["current_version"] == 1
     assert app["actor_id"] == "alice"
+    assert app["is_private"] == 1
 
     version = await registry.get_current_version(app["id"])
     assert version["version"] == 1
@@ -138,3 +140,60 @@ async def test_registry_create_stored_app_and_save_versions():
     assert app["current_version"] == 2
     assert version["version"] == 2
     assert version["html"] == "<h1>Updated</h1>"
+
+
+@pytest.mark.asyncio
+async def test_ensure_tables_migrates_old_access_rows_to_is_private():
+    datasette = Datasette(memory=True)
+
+    def setup_old_schema(conn):
+        conn.executescript("""
+            CREATE TABLE apps (
+                id TEXT PRIMARY KEY,
+                external INTEGER NOT NULL DEFAULT 0,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                path TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                metadata TEXT NOT NULL DEFAULT '{}',
+                actor_id TEXT,
+                current_version INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (external IN (0, 1))
+            );
+            CREATE TABLE app_access (
+                id INTEGER PRIMARY KEY,
+                app_id TEXT REFERENCES apps(id),
+                action TEXT NOT NULL,
+                subject_type TEXT NOT NULL,
+                subject_id TEXT,
+                allow INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (subject_type IN ('authenticated')),
+                CHECK (allow IN (0, 1))
+            );
+            INSERT INTO apps (
+                id, external, name, description, path, source, metadata,
+                actor_id, current_version, created_at, updated_at
+            )
+            VALUES
+                ('private-app', 0, 'Private', '', '/-/apps/private-app', 'datasette-apps', '{}', 'alice', 1, '2026-01-01', '2026-01-01'),
+                ('shared-app', 0, 'Shared', '', '/-/apps/shared-app', 'datasette-apps', '{}', 'alice', 1, '2026-01-01', '2026-01-01'),
+                ('external-app', 1, 'External', '', '/-/external', 'plugin', '{}', NULL, NULL, '2026-01-01', '2026-01-01');
+            INSERT INTO app_access (
+                app_id, action, subject_type, subject_id, allow, created_at, updated_at
+            )
+            VALUES (
+                'shared-app', 'view-app', 'authenticated', NULL, 1, '2026-01-01', '2026-01-01'
+            );
+            """)
+
+    await datasette.get_internal_database().execute_write_fn(setup_old_schema)
+    registry = Registry(datasette)
+    await registry.ensure_tables()
+
+    assert await registry.get_access_mode("private-app") == "private"
+    assert await registry.get_access_mode("shared-app") == "not-private"
+    assert await registry.get_access_mode("external-app") == "not-private"

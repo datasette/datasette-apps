@@ -17,7 +17,8 @@ async def test_create_form_shows_access_data_and_network_controls():
     assert 'textarea id="app-description" name="description"' in response.text
     assert "App access" in response.text
     assert "Private (only me)" in response.text
-    assert "Signed-in users" in response.text
+    assert 'type="checkbox" name="is_private" value="1" checked' in response.text
+    assert 'name="access_mode"' not in response.text
     assert "Specific users" not in response.text
     assert "Specific actor IDs" not in response.text
     assert 'name="actor_ids"' not in response.text
@@ -42,7 +43,10 @@ async def test_create_form_shows_access_data_and_network_controls():
 
 @pytest.mark.asyncio
 async def test_create_form_saves_access_data_and_network_controls():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     registry = Registry(datasette)
 
     response = await datasette.client.post(
@@ -52,7 +56,7 @@ async def test_create_form_saves_access_data_and_network_controls():
             "name": "Shared app",
             "description": "",
             "html": "<h1>Shared</h1>",
-            "access_mode": "signed-in",
+            "is_private": "0",
             "sql_databases_present": "1",
             "sql_databases": "_memory",
             "csp_origins": "https://api.github.com\n",
@@ -61,7 +65,7 @@ async def test_create_form_saves_access_data_and_network_controls():
 
     assert response.status_code == 302
     app_id = response.headers["location"].rsplit("/", 1)[-1]
-    assert await registry.get_access_mode(app_id) == "signed-in"
+    assert await registry.get_access_mode(app_id) == "not-private"
     assert await registry.get_sql_databases(app_id) == ["_memory"]
     assert await registry.get_csp_origins(app_id) == ["https://api.github.com"]
 
@@ -90,7 +94,8 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'textarea id="app-description" name="description"' in response.text
     assert "App access" in response.text
     assert "Private (only me)" in response.text
-    assert "Signed-in users" in response.text
+    assert 'type="checkbox" name="is_private" value="1" checked' in response.text
+    assert 'name="access_mode"' not in response.text
     assert "Specific users" not in response.text
     assert "Specific actor IDs" not in response.text
     assert 'name="actor_ids"' not in response.text
@@ -133,7 +138,7 @@ async def test_edit_form_saves_sql_database_and_csp():
             "name": "Controlled app",
             "description": "",
             "html": "",
-            "access_mode": "private",
+            "is_private": "1",
             "sql_databases_present": "1",
             "sql_databases": "_memory",
             "csp_origins": "https://api.github.com\n",
@@ -146,8 +151,11 @@ async def test_edit_form_saves_sql_database_and_csp():
 
 
 @pytest.mark.asyncio
-async def test_edit_form_signed_in_access_mode_allows_other_actor():
-    datasette = Datasette(memory=True)
+async def test_edit_form_not_private_access_mode_allows_actor_with_view_app():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     app = await Registry(datasette).create_stored_app(
         actor_id="alice",
         name="Shared app",
@@ -162,7 +170,7 @@ async def test_edit_form_signed_in_access_mode_allows_other_actor():
             "name": "Shared app",
             "description": "",
             "html": "<h1>Shared</h1>",
-            "access_mode": "signed-in",
+            "is_private": "0",
             "sql_databases_present": "1",
             "csp_origins": "",
         },

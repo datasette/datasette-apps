@@ -34,11 +34,11 @@
     <aside class="datasette-app-edit-sidebar">
       <h2>App access</h2>
       <div class="datasette-app-form-row">
-        <label for="app-access-mode">Who can open this app</label>
-        <select id="app-access-mode" name="access_mode">
-          <option value="private"{% if access_mode != "signed-in" %} selected{% endif %}>Private (only me)</option>
-          <option value="signed-in"{% if access_mode == "signed-in" %} selected{% endif %}>Signed-in users</option>
-        </select>
+        <input type="hidden" name="is_private" value="0">
+        <label>
+          <input type="checkbox" name="is_private" value="1"{% if access_mode != "not-private" %} checked{% endif %}>
+          Private (only me)
+        </label>
       </div>
 
       <h2>Read-only data access</h2>

@@ -10,10 +10,12 @@ CREATE TABLE IF NOT EXISTS apps (
     source TEXT NOT NULL DEFAULT '',
     metadata TEXT NOT NULL DEFAULT '{}',
     actor_id TEXT,
+    is_private INTEGER NOT NULL DEFAULT 1,
     current_version INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    CHECK (external IN (0, 1))
+    CHECK (external IN (0, 1)),
+    CHECK (is_private IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS app_versions (
@@ -110,6 +112,31 @@ async def ensure_tables(datasette):
     internal_db = datasette.get_internal_database()
 
     def create_schema(conn):
+        existing_tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        if "apps" in existing_tables:
+            app_columns = {row[1] for row in conn.execute("PRAGMA table_info(apps)")}
+            if "is_private" not in app_columns:
+                conn.execute(
+                    "ALTER TABLE apps ADD COLUMN is_private INTEGER NOT NULL DEFAULT 1"
+                )
+                conn.execute("UPDATE apps SET is_private = 0 WHERE external = 1")
+                if "app_access" in existing_tables:
+                    conn.execute("""
+                        UPDATE apps
+                        SET is_private = 0
+                        WHERE id IN (
+                            SELECT app_id
+                            FROM app_access
+                            WHERE action = 'view-app'
+                              AND subject_type = 'authenticated'
+                              AND allow = 1
+                        )
+                        """)
         conn.executescript(SCHEMA)
 
     await internal_db.execute_write_fn(create_schema)

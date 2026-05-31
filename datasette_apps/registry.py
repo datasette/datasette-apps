@@ -60,6 +60,7 @@ APP_COLUMNS = """
     apps.source,
     apps.metadata,
     apps.actor_id,
+    apps.is_private,
     apps.current_version,
     apps.created_at,
     apps.updated_at
@@ -108,11 +109,11 @@ class Registry:
             """
             INSERT INTO apps (
                 id, external, name, description, path, source, metadata,
-                actor_id, current_version, created_at, updated_at
+                actor_id, is_private, current_version, created_at, updated_at
             )
             VALUES (
                 :id, 1, :name, :description, :path, :source, :metadata,
-                NULL, NULL, :now, :now
+                NULL, 0, NULL, :now, :now
             )
             ON CONFLICT(id) DO UPDATE SET
                 external = 1,
@@ -121,6 +122,7 @@ class Registry:
                 path = excluded.path,
                 source = excluded.source,
                 metadata = excluded.metadata,
+                is_private = excluded.is_private,
                 updated_at = excluded.updated_at
             """,
             {
@@ -155,9 +157,9 @@ class Registry:
                 """
                 INSERT INTO apps (
                     id, external, name, description, path, source, metadata,
-                    actor_id, current_version, created_at, updated_at
+                    actor_id, is_private, current_version, created_at, updated_at
                 )
-                VALUES (?, 0, ?, ?, ?, 'datasette-apps', '{}', ?, 1, ?, ?)
+                VALUES (?, 0, ?, ?, ?, 'datasette-apps', '{}', ?, 1, 1, ?, ?)
                 """,
                 (
                     app_id,
@@ -469,41 +471,30 @@ class Registry:
         await self.ensure_tables()
         result = await self.db.execute(
             """
-            SELECT 1
-            FROM app_access
-            WHERE app_id = :app_id
-              AND action = 'view-app'
-              AND subject_type = 'authenticated'
-              AND allow = 1
+            SELECT is_private
+            FROM apps
+            WHERE id = :app_id
             """,
             {"app_id": app_id},
         )
-        return "signed-in" if result.first() else "private"
+        row = result.first()
+        return "private" if row is None or row["is_private"] else "not-private"
 
     async def set_access_mode(self, app_id, mode):
-        if mode not in {"private", "signed-in"}:
+        if mode not in {"private", "not-private"}:
             raise ValueError("Unknown app access mode")
         await self.ensure_tables()
         now = _now()
-
-        def save(conn):
-            conn.execute(
-                """
-                DELETE FROM app_access
-                WHERE app_id = ? AND action = 'view-app'
-                """,
-                (app_id,),
-            )
-            if mode == "signed-in":
-                conn.execute(
-                    """
-                    INSERT INTO app_access (
-                        app_id, action, subject_type, subject_id,
-                        allow, created_at, updated_at
-                    )
-                    VALUES (?, 'view-app', 'authenticated', NULL, 1, ?, ?)
-                    """,
-                    (app_id, now, now),
-                )
-
-        await self.db.execute_write_fn(save)
+        await self.db.execute_write(
+            """
+            UPDATE apps
+            SET is_private = :is_private,
+                updated_at = :updated_at
+            WHERE id = :app_id
+            """,
+            {
+                "app_id": app_id,
+                "is_private": 1 if mode == "private" else 0,
+                "updated_at": now,
+            },
+        )

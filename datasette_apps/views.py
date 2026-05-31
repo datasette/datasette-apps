@@ -103,6 +103,12 @@ def _csp_origins_from_post(post):
     ]
 
 
+def _access_mode_from_post(post):
+    if "is_private" in post:
+        return "private" if "1" in post.getlist("is_private") else "not-private"
+    return None
+
+
 def _revision_diff_lines(previous, version):
     previous_lines = (previous["html"] if previous else "").splitlines()
     version_lines = version["html"].splitlines()
@@ -145,7 +151,7 @@ async def _redirect_after_pin(request):
 
 
 async def apps_index(datasette, request):
-    actor = _require_actor(request)
+    actor = request.actor
     registry = Registry(datasette)
     page_size = 20
     offset = int(request.args.get("next") or "0")
@@ -153,7 +159,7 @@ async def apps_index(datasette, request):
         q=request.args.get("q"),
         limit=page_size + 1,
         offset=offset,
-        actor_id=_actor_id(actor),
+        actor_id=_actor_id(actor) if actor else None,
     )
     has_next = len(apps) > page_size
     apps = apps[:page_size]
@@ -182,6 +188,10 @@ async def apps_index(datasette, request):
                 "q": request.args.get("q"),
                 "next_url": next_url,
                 "current_path": request.full_path,
+                "can_create": await datasette.allowed(
+                    action="create-app", resource=AppsResource(), actor=actor
+                ),
+                "can_pin": bool(actor),
             },
             request=request,
         )
@@ -220,8 +230,9 @@ async def create_app(datasette, request):
         description=post.get("description") or "",
         html=post.get("html") or "",
     )
-    if "access_mode" in post:
-        await registry.set_access_mode(app["id"], post.get("access_mode") or "private")
+    access_mode = _access_mode_from_post(post)
+    if access_mode:
+        await registry.set_access_mode(app["id"], access_mode)
     if "sql_databases_present" in post:
         await registry.set_sql_databases(
             app["id"], await _selected_sql_databases(datasette, actor, post)
@@ -232,7 +243,7 @@ async def create_app(datasette, request):
 
 
 async def view_app(datasette, request):
-    actor = _require_actor(request)
+    actor = request.actor
     app_id = request.url_vars["id"]
     registry = Registry(datasette)
     app = await registry.get_app(app_id)
@@ -240,9 +251,11 @@ async def view_app(datasette, request):
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     version = await registry.get_current_version(app_id)
-    actor_id = _actor_id(actor)
-    await registry.record_access(actor_id, app_id)
-    state = await registry.get_user_state(actor_id, app_id)
+    state = None
+    if actor:
+        actor_id = _actor_id(actor)
+        await registry.record_access(actor_id, app_id)
+        state = await registry.get_user_state(actor_id, app_id)
     csp = build_csp(await registry.get_csp_origins(app_id))
     srcdoc = build_app_srcdoc(version["html"], csp, iframe_bridge_script())
     can_edit = await datasette.allowed(
@@ -259,6 +272,7 @@ async def view_app(datasette, request):
                 "pinned": bool(state and state["pinned_at"]),
                 "current_path": request.path,
                 "can_edit": can_edit,
+                "can_pin": bool(actor),
             },
             request=request,
         )
@@ -306,8 +320,9 @@ async def edit_app(datasette, request):
         post.get("description") or "",
         post.get("html") or "",
     )
-    if "access_mode" in post:
-        await registry.set_access_mode(app_id, post.get("access_mode") or "private")
+    access_mode = _access_mode_from_post(post)
+    if access_mode:
+        await registry.set_access_mode(app_id, access_mode)
     if "sql_databases_present" in post:
         await registry.set_sql_databases(
             app_id, await _selected_sql_databases(datasette, actor, post)
@@ -350,7 +365,7 @@ async def app_revision(datasette, request):
 
 
 async def app_json(datasette, request):
-    actor = _require_actor(request)
+    actor = request.actor
     app_id = request.url_vars["id"]
     registry = Registry(datasette)
     app = await registry.get_app(app_id)
@@ -384,7 +399,7 @@ async def unpin_app(datasette, request):
 
 
 async def app_query(datasette, request):
-    actor = _require_actor(request)
+    actor = request.actor
     app_id = request.url_vars["id"]
     registry = Registry(datasette)
     app = await registry.get_app(app_id)
@@ -409,7 +424,7 @@ async def app_query(datasette, request):
 
 
 async def launch_app(datasette, request):
-    actor = _require_actor(request)
+    actor = request.actor
     app_id = request.url_vars["id"]
     registry = Registry(datasette)
     app = await registry.get_app(app_id)
@@ -418,7 +433,8 @@ async def launch_app(datasette, request):
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     if not app["external"]:
         return Response.redirect(app["path"])
-    await registry.record_access(_actor_id(actor), app_id)
+    if actor:
+        await registry.record_access(_actor_id(actor), app_id)
     return Response.redirect(app["path"])
 
 

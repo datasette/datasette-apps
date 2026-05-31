@@ -7,8 +7,11 @@ from datasette_apps import Registry
 
 
 @pytest.mark.asyncio
-async def test_apps_index_requires_actor_and_lists_apps():
-    datasette = Datasette(memory=True)
+async def test_apps_index_lists_apps_with_view_app_permission():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     await Registry(datasette).add_app(
         id="plugin:one",
         name="Plugin One",
@@ -18,7 +21,8 @@ async def test_apps_index_requires_actor_and_lists_apps():
     )
 
     anonymous = await datasette.client.get("/-/apps")
-    assert anonymous.status_code == 403
+    assert anonymous.status_code == 200
+    assert "Plugin One" not in anonymous.text
 
     response = await datasette.client.get("/-/apps", actor={"id": "alice"})
     assert response.status_code == 200

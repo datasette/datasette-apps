@@ -6,7 +6,10 @@ from datasette_apps import Registry
 
 @pytest.mark.asyncio
 async def test_apps_index_paginates_with_next_cursor():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     registry = Registry(datasette)
     for i in range(21):
         await registry.add_app(

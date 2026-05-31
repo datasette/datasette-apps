@@ -83,35 +83,33 @@ def app_permission_sql(actor, action):
     WHERE actor_id = :actor_id
       AND :actor_id IS NOT NULL
       AND external = 0
-
-    UNION ALL
-
-    SELECT 'apps' AS parent,
-           id AS child,
-           1 AS allow,
-           'Signed-in actors can view external apps' AS reason
-    FROM apps
-    WHERE external = 1
-      AND :actor_id IS NOT NULL
-      AND :action = 'view-app'
-
-    UNION ALL
-
-    SELECT 'apps' AS parent,
-           app_id AS child,
-           allow AS allow,
-           'App access rule' AS reason
-    FROM app_access
-    WHERE action = :action
-      AND subject_type = 'authenticated'
-      AND :actor_id IS NOT NULL
     """
+    restriction_sql = """
+    SELECT 'apps' AS parent,
+           id AS child
+    FROM apps
+    WHERE actor_id = :actor_id
+      AND :actor_id IS NOT NULL
+      AND external = 0
+    """
+    if action == "view-app":
+        restriction_sql = """
+        SELECT 'apps' AS parent,
+               id AS child
+        FROM apps
+        WHERE is_private = 0
+           OR (
+               actor_id = :actor_id
+               AND :actor_id IS NOT NULL
+               AND external = 0
+           )
+        """
     return PermissionSQL(
         source="datasette-apps",
         sql=sql,
+        restriction_sql=restriction_sql,
         params={
             "actor_id": actor_id,
-            "action": action,
             "owner_reason": owner_actions[action],
         },
     )

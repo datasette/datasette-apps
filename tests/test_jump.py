@@ -14,7 +14,10 @@ def app_matches(response):
 
 @pytest.mark.asyncio
 async def test_jump_lists_apps_the_actor_can_view():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     registry = Registry(datasette)
 
     owned = await registry.create_stored_app(
@@ -29,7 +32,7 @@ async def test_jump_lists_apps_the_actor_can_view():
         description="Shared app",
         html="<h1>Shared</h1>",
     )
-    await registry.set_access_mode(shared["id"], "signed-in")
+    await registry.set_access_mode(shared["id"], "not-private")
     await registry.create_stored_app(
         actor_id="carol",
         name="Jumpvisible Private",

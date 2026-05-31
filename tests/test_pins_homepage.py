@@ -6,7 +6,10 @@ from datasette_apps import Registry
 
 @pytest.mark.asyncio
 async def test_pin_routes_and_catalog_order():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     registry = Registry(datasette)
     await registry.add_app(
         id="plugin:first",
@@ -51,7 +54,10 @@ async def test_pin_routes_and_catalog_order():
 
 @pytest.mark.asyncio
 async def test_homepage_shows_three_recent_pinned_apps():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     registry = Registry(datasette)
     for i in range(4):
         app_id = f"plugin:{i}"

@@ -15,15 +15,17 @@
     {% if can_edit %}
     <a class="datasette-app-button" href="{{ urls.path('/-/apps/' ~ app.id ~ '/edit') }}">Edit app</a>
     {% endif %}
-    <form class="datasette-app-pin-form" method="post" action="{{ urls.path('/-/apps/' ~ app.id ~ '/' ~ ('unpin' if pinned else 'pin')) }}">
-      <input type="hidden" name="next" value="{{ current_path }}">
-      <button
-        class="datasette-app-button datasette-app-pin-button"
-        type="submit"
-        aria-pressed="{% if pinned %}true{% else %}false{% endif %}"
-        aria-label="{% if pinned %}Unpin{% else %}Pin{% endif %} {{ app.name }}"
-      >{% if pinned %}Unpin{% else %}Pin{% endif %}</button>
-    </form>
+    {% if can_pin %}
+      <form class="datasette-app-pin-form" method="post" action="{{ urls.path('/-/apps/' ~ app.id ~ '/' ~ ('unpin' if pinned else 'pin')) }}">
+        <input type="hidden" name="next" value="{{ current_path }}">
+        <button
+          class="datasette-app-button datasette-app-pin-button"
+          type="submit"
+          aria-pressed="{% if pinned %}true{% else %}false{% endif %}"
+          aria-label="{% if pinned %}Unpin{% else %}Pin{% endif %} {{ app.name }}"
+        >{% if pinned %}Unpin{% else %}Pin{% endif %}</button>
+      </form>
+    {% endif %}
   </div>
 </div>
 

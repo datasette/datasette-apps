@@ -34,8 +34,11 @@ async def test_owner_can_view_and_edit_stored_app():
 
 
 @pytest.mark.asyncio
-async def test_signed_in_users_can_create_and_view_external_apps():
-    datasette = Datasette(memory=True)
+async def test_actors_with_view_app_can_create_and_view_external_apps():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     await Registry(datasette).add_app(
         id="plugin:one",
         name="Plugin One",
@@ -63,6 +66,123 @@ async def test_signed_in_users_can_create_and_view_external_apps():
 
 
 @pytest.mark.asyncio
+async def test_non_private_app_requires_view_app_permission():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Shared app",
+        description="",
+        html="<h1>Shared</h1>",
+    )
+    await registry.set_access_mode(app["id"], "not-private")
+    await datasette.invoke_startup()
+
+    assert not await datasette.allowed(
+        action="view-app",
+        resource=AppResource(app["id"]),
+        actor={"id": "bob"},
+    )
+
+    datasette_with_permission = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
+    registry_with_permission = Registry(datasette_with_permission)
+    app_with_permission = await registry_with_permission.create_stored_app(
+        actor_id="alice",
+        name="Shared app",
+        description="",
+        html="<h1>Shared</h1>",
+    )
+    await registry_with_permission.set_access_mode(
+        app_with_permission["id"], "not-private"
+    )
+    await datasette_with_permission.invoke_startup()
+
+    assert await datasette_with_permission.allowed(
+        action="view-app",
+        resource=AppResource(app_with_permission["id"]),
+        actor={"id": "bob"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_private_app_blocks_broad_view_app_permission():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Private app",
+        description="",
+        html="<h1>Private</h1>",
+    )
+    await datasette.invoke_startup()
+
+    assert await datasette.allowed(
+        action="view-app",
+        resource=AppResource(app["id"]),
+        actor={"id": "alice"},
+    )
+    assert not await datasette.allowed(
+        action="view-app",
+        resource=AppResource(app["id"]),
+        actor={"id": "bob"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_anonymous_can_view_non_private_app_if_permission_allows():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": True}},
+    )
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Anonymous app",
+        description="",
+        html="<h1>Anonymous</h1>",
+    )
+    await registry.set_access_mode(app["id"], "not-private")
+    await datasette.invoke_startup()
+
+    response = await datasette.client.get(f"/-/apps/{app['id']}")
+
+    assert response.status_code == 200
+    assert "Anonymous app" in response.text
+    assert "datasette-app-pin-form" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_edit_app_is_owner_only_even_with_permission_grant():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"edit-app": {"id": "*"}}},
+    )
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Owned",
+        description="",
+        html="",
+    )
+    await datasette.invoke_startup()
+
+    assert await datasette.allowed(
+        action="edit-app",
+        resource=AppResource(app["id"]),
+        actor={"id": "alice"},
+    )
+    assert not await datasette.allowed(
+        action="edit-app",
+        resource=AppResource(app["id"]),
+        actor={"id": "bob"},
+    )
+
+
+@pytest.mark.asyncio
 async def test_routes_enforce_app_permissions():
     datasette = Datasette(memory=True)
     app = await Registry(datasette).create_stored_app(
@@ -81,7 +201,10 @@ async def test_routes_enforce_app_permissions():
 
 @pytest.mark.asyncio
 async def test_shared_app_only_shows_edit_button_to_owner():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
     registry = Registry(datasette)
     app = await registry.create_stored_app(
         actor_id="alice",
@@ -89,7 +212,7 @@ async def test_shared_app_only_shows_edit_button_to_owner():
         description="",
         html="<h1>Shared</h1>",
     )
-    await registry.set_access_mode(app["id"], "signed-in")
+    await registry.set_access_mode(app["id"], "not-private")
 
     owner = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "alice"})
     viewer = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "bob"})

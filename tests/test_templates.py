@@ -122,3 +122,34 @@ async def test_app_links_respect_base_url():
         + edit_response.text
         + revision_response.text
     )
+
+
+@pytest.mark.asyncio
+async def test_apps_list_marks_private_apps():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
+    registry = Registry(datasette)
+    await registry.create_stored_app(
+        actor_id="alice",
+        name="Marked private app",
+        description="",
+        html="",
+    )
+    public_app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Marked public app",
+        description="",
+        html="",
+    )
+    await registry.set_access_mode(public_app["id"], "not-private")
+
+    response = await datasette.client.get("/-/apps", actor={"id": "alice"})
+
+    assert response.status_code == 200
+    private_item = response.text.split("Marked private app", 1)[1].split("</li>", 1)[0]
+    public_item = response.text.split("Marked public app", 1)[1].split("</li>", 1)[0]
+    assert "datasette-app-private-badge" in private_item
+    assert "datasette-app-private-badge" not in public_item
+    assert response.text.count("datasette-app-private-badge") == 1
