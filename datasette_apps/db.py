@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS apps (
     metadata TEXT NOT NULL DEFAULT '{}',
     actor_id TEXT,
     is_private INTEGER NOT NULL DEFAULT 1,
+    stored_queries TEXT NOT NULL DEFAULT '[]',
     current_version INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS app_revisions (
     html TEXT,
     is_private INTEGER,
     sql_databases TEXT,
+    stored_queries TEXT,
     csp_origins TEXT,
     changed_fields TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
@@ -145,6 +147,10 @@ async def ensure_tables(datasette):
                               AND allow = 1
                         )
                         """)
+            if "stored_queries" not in app_columns:
+                conn.execute(
+                    "ALTER TABLE apps ADD COLUMN stored_queries TEXT NOT NULL DEFAULT '[]'"
+                )
         if "apps" in existing_tables:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS app_sql_databases (
@@ -177,6 +183,7 @@ async def ensure_tables(datasette):
                     html TEXT,
                     is_private INTEGER,
                     sql_databases TEXT,
+                    stored_queries TEXT,
                     csp_origins TEXT,
                     changed_fields TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
@@ -184,12 +191,17 @@ async def ensure_tables(datasette):
                     CHECK (is_private IN (0, 1) OR is_private IS NULL)
                 )
                 """)
+            revision_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(app_revisions)")
+            }
+            if "stored_queries" not in revision_columns:
+                conn.execute("ALTER TABLE app_revisions ADD COLUMN stored_queries TEXT")
         if "apps" in existing_tables and "app_versions" in existing_tables:
             conn.execute("""
                 INSERT INTO app_revisions (
                     app_id, version, actor_id, name, description, html,
-                    is_private, sql_databases, csp_origins, changed_fields,
-                    created_at
+                    is_private, sql_databases, stored_queries, csp_origins,
+                    changed_fields, created_at
                 )
                 SELECT
                     apps.id,
@@ -227,6 +239,7 @@ async def ensure_tables(datasette):
                         ),
                         '[]'
                     ),
+                    apps.stored_queries,
                     COALESCE(
                         (
                             SELECT json_group_array(origin)
@@ -240,7 +253,7 @@ async def ensure_tables(datasette):
                         ),
                         '[]'
                     ),
-                    '["name", "description", "html", "is_private", "sql_databases", "csp_origins"]',
+                    '["name", "description", "html", "is_private", "sql_databases", "stored_queries", "csp_origins"]',
                     apps.updated_at
                 FROM apps
                 WHERE apps.external = 0
@@ -273,8 +286,8 @@ async def ensure_tables(datasette):
             conn.execute("""
             INSERT INTO app_revisions (
                 app_id, version, actor_id, name, description, html,
-                is_private, sql_databases, csp_origins, changed_fields,
-                created_at
+                is_private, sql_databases, stored_queries, csp_origins,
+                changed_fields, created_at
             )
             SELECT
                 apps.id,
@@ -296,6 +309,7 @@ async def ensure_tables(datasette):
                     ),
                     '[]'
                 ),
+                apps.stored_queries,
                 COALESCE(
                     (
                         SELECT json_group_array(origin)
@@ -309,7 +323,7 @@ async def ensure_tables(datasette):
                     ),
                     '[]'
                 ),
-                '["name", "description", "html", "is_private", "sql_databases", "csp_origins"]',
+                '["name", "description", "html", "is_private", "sql_databases", "stored_queries", "csp_origins"]',
                 apps.updated_at
             FROM apps
             WHERE apps.external = 0

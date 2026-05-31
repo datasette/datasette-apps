@@ -45,6 +45,7 @@
 {% endblock %}
 
 {% block content %}
+{% import "_stored_query_picker.html" as stored_query_picker %}
 <h1>Edit {{ app.name }}</h1>
 
 <form class="datasette-app-form datasette-app-edit-form" method="post">
@@ -93,6 +94,11 @@
             <p>No databases are visible to you.</p>
           {% endfor %}
         </fieldset>
+      </div>
+
+      <h2>Stored query access</h2>
+      <div class="datasette-app-form-row">
+        {{ stored_query_picker.picker(stored_queries, query_search_url) }}
       </div>
 
       <h2>Network access</h2>

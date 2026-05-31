@@ -109,6 +109,31 @@ async def test_registry_stores_sql_database_allow_list():
 
 
 @pytest.mark.asyncio
+async def test_registry_stores_stored_query_allow_list():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Query app",
+        description="",
+        html="",
+    )
+
+    await registry.set_stored_queries(
+        app["id"], ["content/report", "content/report", "_memory/one"]
+    )
+
+    assert await registry.get_stored_queries(app["id"]) == [
+        "_memory/one",
+        "content/report",
+    ]
+
+    await registry.set_stored_queries(app["id"], [])
+
+    assert await registry.get_stored_queries(app["id"]) == []
+
+
+@pytest.mark.asyncio
 async def test_registry_create_stored_app_and_save_versions():
     datasette = Datasette(memory=True)
     registry = Registry(datasette)
@@ -183,7 +208,7 @@ async def test_registry_uses_app_revisions_delta_log_for_settings_changes():
             "version": 1,
             "html": "<h1>Hello</h1>",
             "is_private": 1,
-            "changed_fields": '["name", "description", "html", "is_private", "sql_databases", "csp_origins"]',
+            "changed_fields": '["name", "description", "html", "is_private", "sql_databases", "stored_queries", "csp_origins"]',
         },
         {
             "version": 2,
@@ -206,19 +231,25 @@ async def test_registry_records_data_and_network_access_revision_deltas():
     )
 
     await registry.set_sql_databases(app["id"], ["_memory"])
+    await registry.set_stored_queries(app["id"], ["_memory/report"])
     await registry.set_csp_origins(app["id"], ["https://api.github.com"])
 
     current = await registry.get_current_version(app["id"])
     sql_revision = await registry.get_version(app["id"], 2)
-    csp_revision = await registry.get_version(app["id"], 3)
+    stored_query_revision = await registry.get_version(app["id"], 3)
+    csp_revision = await registry.get_version(app["id"], 4)
 
-    assert current["version"] == 3
+    assert current["version"] == 4
     assert current["html"] == "<h1>Hello</h1>"
     assert current["sql_databases"] == ["_memory"]
+    assert current["stored_queries"] == ["_memory/report"]
     assert current["csp_origins"] == ["https://api.github.com"]
     assert sql_revision["revision_html"] is None
     assert sql_revision["changed_fields"] == ["sql_databases"]
     assert sql_revision["sql_databases"] == ["_memory"]
+    assert stored_query_revision["revision_html"] is None
+    assert stored_query_revision["changed_fields"] == ["stored_queries"]
+    assert stored_query_revision["stored_queries"] == ["_memory/report"]
     assert csp_revision["revision_html"] is None
     assert csp_revision["changed_fields"] == ["csp_origins"]
     assert csp_revision["csp_origins"] == ["https://api.github.com"]
@@ -407,6 +438,7 @@ async def test_ensure_tables_recovers_html_if_partial_revision_migration_exists(
                 html TEXT,
                 is_private INTEGER,
                 sql_databases TEXT,
+                stored_queries TEXT,
                 csp_origins TEXT,
                 changed_fields TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
@@ -428,13 +460,13 @@ async def test_ensure_tables_recovers_html_if_partial_revision_migration_exists(
                 ('partial-app', 2, '<h1>Latest HTML</h1>', '2026-01-02');
             INSERT INTO app_revisions (
                 app_id, version, actor_id, name, description, html,
-                is_private, sql_databases, csp_origins, changed_fields,
-                created_at
+                is_private, sql_databases, stored_queries, csp_origins,
+                changed_fields, created_at
             )
             VALUES (
                 'partial-app', 1, 'alice', 'Partial', '', '',
-                0, '[]', '[]',
-                '["name", "description", "html", "is_private", "sql_databases", "csp_origins"]',
+                0, '[]', '[]', '[]',
+                '["name", "description", "html", "is_private", "sql_databases", "stored_queries", "csp_origins"]',
                 '2026-01-03'
             );
             """)
@@ -506,6 +538,7 @@ async def test_ensure_tables_creates_placeholder_revision_for_apps_without_histo
         "html",
         "is_private",
         "sql_databases",
+        "stored_queries",
         "csp_origins",
     ]
 

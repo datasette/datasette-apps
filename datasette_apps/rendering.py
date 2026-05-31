@@ -186,7 +186,7 @@ def iframe_bridge_script():
       callbacks.resolve(message.result);
     } else {
       var errorMessage = message.error || "Query request failed";
-      postAppError("datasette-query-error", {message: errorMessage});
+      postAppError(callbacks.errorKind || "datasette-query-error", {message: errorMessage});
       callbacks.reject(new Error(errorMessage));
     }
   });
@@ -195,15 +195,41 @@ def iframe_bridge_script():
     query: function(database, sql, params) {
       var id = nextId++;
       return new Promise(function(resolve, reject) {
-        pending.set(id, {resolve: resolve, reject: reject});
+        pending.set(id, {
+          resolve: resolve,
+          reject: reject,
+          errorKind: "datasette-query-error"
+        });
         parent.postMessage({
           type: "datasette-app-query",
           id: id,
           input: {database: database, sql: sql, params: params || {}}
         }, "*");
       });
+    },
+    storedQuery: function(database, query, params) {
+      if (typeof query !== "string" && typeof database === "string" && database.indexOf("/") > -1) {
+        params = query || {};
+        var parts = database.split("/");
+        database = parts.shift();
+        query = parts.join("/");
+      }
+      var id = nextId++;
+      return new Promise(function(resolve, reject) {
+        pending.set(id, {
+          resolve: resolve,
+          reject: reject,
+          errorKind: "datasette-stored-query-error"
+        });
+        parent.postMessage({
+          type: "datasette-app-stored-query",
+          id: id,
+          input: {database: database, query: query, params: params || {}}
+        }, "*");
+      });
     }
   };
+  window.datasette.runStoredQuery = window.datasette.storedQuery;
 })();
 </script>"""
 
@@ -317,7 +343,10 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
       addAppError(message.error || {});
       return;
     }
-    if (message.type !== "datasette-app-query") {
+    if (
+      message.type !== "datasette-app-query" &&
+      message.type !== "datasette-app-stored-query"
+    ) {
       return;
     }
     var reply = {

@@ -31,7 +31,7 @@ This plugin allows you to create and modify HTML apps, and provides a plugin hoo
 
 Signed-in users get an "Apps" link in Datasette's top-right menu.
 
-HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and store every edit as a new row in `app_versions`.
+HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and track every edit as a new row in `app_revisions`.
 
 Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` origins configured, those same origins are allowed for remote images, external script tags, and external stylesheet links/style elements, and localhost origins are never allowed. Local file previews using `data:` and `blob:` image URLs are allowed.
 
@@ -39,7 +39,9 @@ The iframe bridge reports JavaScript errors, unhandled promise rejections, CSP v
 
 The bridge also replaces `history.replaceState()`, `history.pushState()`, `history.back()`, `history.forward()`, and `history.go()` with no-op functions inside the sandboxed iframe, avoiding browser errors from apps that try to manage URL state.
 
-Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped query endpoint. Apps have a simple SQL database allow-list configured on the edit page; if the requested database is allowed, the query is forwarded to Datasette's own read-only query JSON API using the current actor, so Datasette's normal SQL permissions still apply.
+Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. They can also run allow-listed stored queries using `datasette.storedQuery(database, query, params)` or `datasette.storedQuery("database/query", params)`. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped query endpoint. Apps have allow-lists configured on the edit page; if the requested database or stored query is allowed, the request is forwarded to Datasette's own JSON APIs using the current actor, so Datasette's normal SQL and query permissions still apply. Failed stored-query attempts, including attempts to call a query that is not allow-listed or that the current actor cannot run, are reported in the app page error panel.
+
+Stored query access is configured using a picker on the create and edit pages. The picker searches Datasette's `/-/queries.json?q=search-term` API and stores selected queries as `database-name/query-name` strings. Removing a query uses the `x` button next to that selected query. Additions and removals are not applied until the page is saved.
 
 The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can always view, edit, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
 
@@ -57,11 +59,11 @@ Signed-in users can pin apps from the catalog and from individual stored app pag
 
 The `/-/apps` catalog is searchable and paginated, using a `next` cursor in the URL for subsequent pages.
 
-The create page includes a copyable prompt for an LLM. The prompt explains the sandbox, the `datasette.query()` bridge, CSP restrictions, and includes a schema summary limited to tables and views the current actor can see.
+The create page includes a copyable prompt for an LLM. The prompt explains the sandbox, the `datasette.query()` and `datasette.storedQuery()` bridges, CSP restrictions, and includes schema and stored-query summaries limited to resources the current actor can see.
 
 The create and edit pages use Datasette's existing bundled CodeMirror editor for the HTML source textarea.
 
-The edit page includes a private checkbox, SQL query database access, and allowed network origins.
+The edit page includes a private checkbox, SQL query database access, stored query access, and allowed network origins.
 
 Plugins can add their own apps to the central catalog during startup:
 

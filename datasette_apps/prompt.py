@@ -58,8 +58,26 @@ async def _schema_lines(datasette, actor):
     return "\n".join(lines)
 
 
+async def _stored_query_lines(datasette, actor):
+    page = await datasette.list_queries(actor=actor, limit=1000, include_private=True)
+    if not page.queries:
+        return "No stored queries are visible to the current actor."
+    lines = []
+    for query in page.queries:
+        key = f"{query.database}/{query.name}"
+        mode = "writable" if query.is_write else "read-only"
+        label = query.title or query.name
+        lines.append(f"- {key}: {label} ({mode})")
+        if query.description:
+            lines.append(f"  description: {query.description}")
+        if query.parameters:
+            lines.append(f"  parameters: {', '.join(query.parameters)}")
+    return "\n".join(lines)
+
+
 async def build_llm_prompt(datasette, actor):
     schema = await _schema_lines(datasette, actor)
+    stored_queries = await _stored_query_lines(datasette, actor)
     return f"""Build a Datasette HTML app.
 
 Return a complete single-file HTML document. Include <!DOCTYPE html>, CSS, and JavaScript in the same file.
@@ -83,10 +101,20 @@ Use this API for data access:
 - Query access is limited to databases enabled for this app and this actor's normal Datasette SQL permissions.
 - If a database is not selected in the app's Data access settings, datasette.query() cannot query it.
 - The returned value has this shape: {{columns: [...], rows: [{{...}}, ...]}}.
+- await datasette.storedQuery(database, query, params?)
+- You can also call await datasette.storedQuery("database/query", params?).
+- Stored query access is limited to queries selected in this app's Stored query access settings and this actor's normal Datasette query permissions.
+- Stored queries are selected on the create/edit page by searching the stored query picker. You must save the page after adding or removing queries before the app can use those changes.
+- Use stored queries when the app should call existing saved logic, especially writable queries or queries with carefully designed permissions.
+- Read-only stored queries return {{columns: [...], rows: [{{...}}, ...]}}. Writable stored queries return Datasette's JSON execution response.
 
 Available schema for this actor:
 
 {schema}
+
+Available stored queries for this actor:
+
+{stored_queries}
 
 Small example:
 
@@ -101,10 +129,9 @@ Small example:
   <pre id="output">Loading...</pre>
   <script>
   async function main() {{
-    const result = await datasette.query(
-      "main",
-      "select * from example_table limit 10"
-    );
+    const result = await datasette.query("main", "select * from example_table limit 10");
+    // For an allow-listed stored query, use:
+    // const result = await datasette.storedQuery("main/example_query", {{id: 1}});
     document.getElementById("output").textContent =
       JSON.stringify(result.rows, null, 2);
   }}
