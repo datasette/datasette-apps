@@ -1,0 +1,213 @@
+{% macro prompt(llm_prompt_data) %}
+<section class="datasette-app-llm-prompt">
+  <h2>LLM prompt</h2>
+  <div class="datasette-app-form-actions">
+    <button type="button" id="copy-llm-prompt">Copy prompt</button>
+  </div>
+  <textarea id="llm-prompt" rows="24" cols="100" readonly></textarea>
+  <script type="application/json" id="llm-prompt-data">{{ llm_prompt_data|tojson }}</script>
+</section>
+
+<script>
+(function() {
+  var promptInput = document.getElementById("llm-prompt");
+  var dataElement = document.getElementById("llm-prompt-data");
+  var copyButton = document.getElementById("copy-llm-prompt");
+  if (!promptInput || !dataElement) {
+    return;
+  }
+
+  var promptData = {};
+  try {
+    promptData = JSON.parse(dataElement.textContent || "{}");
+  } catch (ignore) {
+  }
+
+  function checkedValues(selector) {
+    return Array.prototype.map.call(
+      document.querySelectorAll(selector),
+      function(input) { return input.value; }
+    );
+  }
+
+  function networkOrigins() {
+    var input = document.getElementById("app-csp-origins");
+    if (!input) {
+      return [];
+    }
+    return input.value.split(/\r?\n/).map(function(origin) {
+      return origin.trim();
+    }).filter(Boolean);
+  }
+
+  function selectedStoredQueries() {
+    return Array.prototype.map.call(
+      document.querySelectorAll(".datasette-app-stored-query-list [data-query-key]"),
+      function(item) {
+        var parameters = [];
+        try {
+          parameters = JSON.parse(item.getAttribute("data-query-parameters") || "[]");
+        } catch (ignore) {
+        }
+        return {
+          key: item.getAttribute("data-query-key"),
+          label: item.getAttribute("data-query-label") || item.getAttribute("data-query-key"),
+          description: item.getAttribute("data-query-description") || "",
+          parameters: parameters,
+          isWrite: item.getAttribute("data-query-is-write") === "1"
+        };
+      }
+    );
+  }
+
+  function listOrFallback(items, fallback) {
+    if (!items.length) {
+      return fallback;
+    }
+    return items.map(function(item) { return "- " + item; }).join("\n");
+  }
+
+  function storedQueryLines(queries) {
+    if (!queries.length) {
+      return "No stored queries are currently selected for this app.";
+    }
+    var lines = [];
+    queries.forEach(function(query) {
+      var mode = query.isWrite ? "writable" : "read-only";
+      lines.push("- " + query.key + ": " + query.label + " (" + mode + ")");
+      if (query.description) {
+        lines.push("  description: " + query.description);
+      }
+      if (query.parameters && query.parameters.length) {
+        lines.push("  parameters: " + query.parameters.join(", "));
+      }
+    });
+    return lines.join("\n");
+  }
+
+  function appSummary() {
+    var nameInput = document.getElementById("app-name");
+    var descriptionInput = document.getElementById("app-description");
+    var lines = [];
+    if (nameInput && nameInput.value.trim()) {
+      lines.push("App name: " + nameInput.value.trim());
+    }
+    if (descriptionInput && descriptionInput.value.trim()) {
+      lines.push("App description: " + descriptionInput.value.trim());
+    }
+    return lines.length ? lines.join("\n") + "\n\n" : "";
+  }
+
+  function currentHtml() {
+    var htmlInput = document.getElementById("html-editor");
+    if (!htmlInput) {
+      return "";
+    }
+    if (htmlInput.datasetteAppsEditorView) {
+      return htmlInput.datasetteAppsEditorView.state.doc.toString();
+    }
+    return htmlInput.value;
+  }
+
+  function markdownFenceFor(text) {
+    var longestRun = 2;
+    var matches = text.match(/`+/g) || [];
+    matches.forEach(function(match) {
+      longestRun = Math.max(longestRun, match.length);
+    });
+    return "`".repeat(longestRun + 1);
+  }
+
+  function currentHtmlBlock() {
+    var html = currentHtml();
+    if (!html) {
+      return "Current app HTML:\n\nNo HTML has been entered yet.";
+    }
+    var fence = markdownFenceFor(html);
+    return "Current app HTML:\n\n" + fence + "html\n" + html + "\n" + fence;
+  }
+
+  function buildPrompt() {
+    var databases = checkedValues("input[name='sql_databases']:checked");
+    var origins = networkOrigins();
+    var storedQueries = selectedStoredQueries();
+    promptInput.value = "Build a Datasette HTML app.\n\n" +
+      appSummary() +
+      "Return a complete single-file HTML document. Include <!DOCTYPE html>, CSS, and JavaScript in the same file.\n\n" +
+      "This app will run inside a sandboxed iframe protected by a strict Content Security Policy.\n\n" +
+      "Important limitations:\n" +
+      "- Direct network access is disabled by default.\n" +
+      "- The app cannot fetch from Datasette, localhost, or arbitrary origins.\n" +
+      "- External fetch() requests only work for exact https:// origins explicitly granted in the app's network access settings.\n" +
+      "- Remote images are allowed from those same exact https:// origins. Local file previews using data: and blob: image URLs are allowed.\n" +
+      "- External script tags are allowed from those same exact https:// origins.\n" +
+      "- External stylesheet links and style elements are allowed from those same exact https:// origins.\n" +
+      "- history.replaceState(), history.pushState(), history.back(), history.forward(), and history.go() are no-ops in the sandbox.\n" +
+      "- CORS still applies even when an origin is granted.\n" +
+      "- datasette.executeQuery() is not available.\n\n" +
+      "Use this API for data access:\n" +
+      "- await datasette.query(database, sql, params?)\n" +
+      "- The SQL must be read-only.\n" +
+      "- Query access is limited to databases enabled for this app and this actor's normal Datasette SQL permissions.\n" +
+      "- If a database is not selected in the app's Data access settings, datasette.query() cannot query it.\n" +
+      "- The returned value has this shape: {columns: [...], rows: [{...}, ...]}.\n" +
+      "- await datasette.storedQuery(database, query, params?)\n" +
+      "- You can also call await datasette.storedQuery(\"database/query\", params?).\n" +
+      "- Stored query access is limited to queries selected in this app's Stored query access settings and this actor's normal Datasette query permissions.\n" +
+      "- Stored queries are selected on the create/edit page by searching the stored query picker. You must save the page after adding or removing queries before the app can use those changes.\n" +
+      "- Use stored queries when the app should call existing saved logic, especially writable queries or queries with carefully designed permissions.\n" +
+      "- Read-only stored queries return {columns: [...], rows: [{...}, ...]}. Writable stored queries return Datasette's JSON execution response.\n\n" +
+      "Currently selected read-only SQL databases:\n\n" +
+      listOrFallback(databases, "No read-only SQL databases are currently selected for this app.") + "\n\n" +
+      "Currently selected stored queries:\n\n" +
+      storedQueryLines(storedQueries) + "\n\n" +
+      "Currently selected external network origins:\n\n" +
+      listOrFallback(origins, "No external network origins are currently selected for this app.") + "\n\n" +
+      "These selections reflect the current form state. If you have changed access settings, save this page before the running app can use those changes.\n\n" +
+      "Available schema for this actor:\n\n" +
+      (promptData.schema || "No tables or views are visible to the current actor.") + "\n\n" +
+      currentHtmlBlock() + "\n\n" +
+      "Small example:\n\n" +
+      "<!DOCTYPE html>\n" +
+      "<html>\n" +
+      "<head>\n" +
+      "  <meta charset=\"utf-8\">\n" +
+      "  <title>Example Datasette app</title>\n" +
+      "</head>\n" +
+      "<body>\n" +
+      "  <h1>Recent rows</h1>\n" +
+      "  <pre id=\"output\">Loading...</pre>\n" +
+      "  <script>\n" +
+      "  async function main() {\n" +
+      "    const result = await datasette.query(\"main\", \"select * from example_table limit 10\");\n" +
+      "    // For an allow-listed stored query, use:\n" +
+      "    // const result = await datasette.storedQuery(\"main/example_query\", {id: 1});\n" +
+      "    document.getElementById(\"output\").textContent =\n" +
+      "      JSON.stringify(result.rows, null, 2);\n" +
+      "  }\n" +
+      "  main().catch(error => {\n" +
+      "    document.getElementById(\"output\").textContent = String(error);\n" +
+      "  });\n" +
+      "  <\/script>\n" +
+      "</body>\n" +
+      "</html>\n";
+  }
+
+  if (copyButton) {
+    copyButton.addEventListener("click", async function() {
+      buildPrompt();
+      await navigator.clipboard.writeText(promptInput.value);
+    });
+  }
+
+  document.addEventListener("input", buildPrompt);
+  document.addEventListener("change", buildPrompt);
+  document.addEventListener("keyup", buildPrompt);
+  document.addEventListener("paste", function() {
+    window.setTimeout(buildPrompt, 0);
+  });
+  document.addEventListener("datasette-app-stored-queries-changed", buildPrompt);
+  buildPrompt();
+})();
+</script>
+{% endmacro %}

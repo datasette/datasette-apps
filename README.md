@@ -59,7 +59,7 @@ Signed-in users can pin apps from the catalog and from individual stored app pag
 
 The `/-/apps` catalog is searchable and paginated, using a `next` cursor in the URL for subsequent pages.
 
-The create page includes a copyable prompt for an LLM. The prompt explains the sandbox, the `datasette.query()` and `datasette.storedQuery()` bridges, CSP restrictions, and includes schema and stored-query summaries limited to resources the current actor can see.
+The create and edit pages include a copyable prompt for an LLM. The prompt is assembled in the browser from the current form state, so unsaved changes to selected databases, stored queries, and network origins are reflected immediately. It explains the sandbox, the `datasette.query()` and `datasette.storedQuery()` bridges, CSP restrictions, the current schema summary, and only the stored queries selected for that app.
 
 The create and edit pages use Datasette's existing bundled CodeMirror editor for the HTML source textarea.
 

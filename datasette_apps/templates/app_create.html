@@ -13,6 +13,7 @@
 
 {% block content %}
 {% import "_stored_query_picker.html" as stored_query_picker %}
+{% import "_llm_prompt.html" as llm_prompt %}
 <h1>Create app</h1>
 
 <form class="datasette-app-form datasette-app-edit-form" method="post">
@@ -65,7 +66,7 @@
 
       <h2>Stored query access</h2>
       <div class="datasette-app-form-row">
-        {{ stored_query_picker.picker(stored_queries, query_search_url) }}
+        {{ stored_query_picker.picker(stored_query_options, query_search_url) }}
       </div>
 
       <h2>Network access</h2>
@@ -84,17 +85,5 @@
   </div>
 </form>
 
-<section class="datasette-app-llm-prompt">
-  <h2>LLM prompt</h2>
-  <div class="datasette-app-form-actions">
-    <button type="button" id="copy-llm-prompt">Copy prompt</button>
-  </div>
-  <textarea id="llm-prompt" rows="24" cols="100" readonly>{{ llm_prompt }}</textarea>
-</section>
-
-<script>
-document.getElementById("copy-llm-prompt").addEventListener("click", async function() {
-  await navigator.clipboard.writeText(document.getElementById("llm-prompt").value);
-});
-</script>
+{{ llm_prompt.prompt(llm_prompt_data) }}
 {% endblock %}

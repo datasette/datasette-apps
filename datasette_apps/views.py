@@ -11,7 +11,7 @@ from datasette.resources import DatabaseResource, QueryResource
 from .csp import build_csp
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
 from .permissions import AppResource, AppsResource
-from .prompt import build_llm_prompt
+from .prompt import build_llm_prompt_data, stored_query_options
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
 from .registry import Registry
 
@@ -52,7 +52,7 @@ def _codemirror_assets():
 window.addEventListener("DOMContentLoaded", function() {
   var htmlInput = document.querySelector("textarea#html-editor");
   if (htmlInput && window.cm && window.cm.editorFromTextArea) {
-    cm.editorFromTextArea(htmlInput, {schema: {}});
+    htmlInput.datasetteAppsEditorView = cm.editorFromTextArea(htmlInput, {schema: {}});
   }
 });
 </script>
@@ -273,7 +273,6 @@ async def create_app(datasette, request):
     ):
         raise Forbidden("Permission denied: create-app")
     if request.method == "GET":
-        prompt = await build_llm_prompt(datasette, actor)
         sql_database_options = [
             {"name": database_name, "selected": False}
             for database_name in await _visible_database_names(datasette, actor)
@@ -282,9 +281,9 @@ async def create_app(datasette, request):
             await datasette.render_template(
                 "app_create.html",
                 {
-                    "llm_prompt": prompt,
+                    "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
                     "sql_database_options": sql_database_options,
-                    "stored_queries": [],
+                    "stored_query_options": [],
                     "query_search_url": datasette.urls.path("/-/queries.json"),
                     "codemirror_assets": _codemirror_assets(),
                 },
@@ -390,9 +389,12 @@ async def edit_app(datasette, request):
                     "revisions": revisions,
                     "access_mode": access_mode,
                     "sql_database_options": sql_database_options,
-                    "stored_queries": stored_queries,
+                    "stored_query_options": await stored_query_options(
+                        datasette, stored_queries
+                    ),
                     "query_search_url": datasette.urls.path("/-/queries.json"),
                     "csp_origins": csp_origins,
+                    "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
                     "codemirror_assets": _codemirror_assets(),
                 },
                 request=request,

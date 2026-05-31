@@ -1,4 +1,4 @@
-{% macro picker(stored_queries, query_search_url) %}
+{% macro picker(stored_query_options, query_search_url) %}
 <div class="datasette-app-stored-query-picker" data-query-search-url="{{ query_search_url }}">
   <input type="hidden" name="stored_queries_present" value="1">
   <label for="stored-query-search">Stored queries</label>
@@ -10,11 +10,17 @@
   </div>
   <div class="datasette-app-stored-query-results" hidden></div>
   <ul class="datasette-app-stored-query-list">
-    {% for stored_query in stored_queries %}
-      <li data-query-key="{{ stored_query }}">
-        <span>{{ stored_query }}</span>
-        <input type="hidden" name="stored_queries" value="{{ stored_query }}">
-        <button type="button" aria-label="Remove {{ stored_query }}">&times;</button>
+    {% for stored_query in stored_query_options %}
+      <li
+        data-query-key="{{ stored_query.key }}"
+        data-query-label="{{ stored_query.label }}"
+        data-query-description="{{ stored_query.description }}"
+        data-query-parameters='{{ stored_query.parameters|tojson }}'
+        data-query-is-write="{{ '1' if stored_query.is_write else '0' }}"
+      >
+        <span>{{ stored_query.label }}</span>
+        <input type="hidden" name="stored_queries" value="{{ stored_query.key }}">
+        <button type="button" aria-label="Remove {{ stored_query.key }}">&times;</button>
       </li>
     {% endfor %}
   </ul>
@@ -40,15 +46,24 @@
     list.hidden = selected.size === 0;
   }
 
-  function addStoredQuery(key, label) {
+  function emitChanged() {
+    document.dispatchEvent(new CustomEvent("datasette-app-stored-queries-changed"));
+  }
+
+  function addStoredQuery(query) {
+    var key = query.key;
     if (!key || selected.has(key)) {
       return;
     }
     selected.add(key);
     var item = document.createElement("li");
     item.setAttribute("data-query-key", key);
+    item.setAttribute("data-query-label", query.label || key);
+    item.setAttribute("data-query-description", query.description || "");
+    item.setAttribute("data-query-parameters", JSON.stringify(query.parameters || []));
+    item.setAttribute("data-query-is-write", query.isWrite ? "1" : "0");
     var text = document.createElement("span");
-    text.textContent = label || key;
+    text.textContent = query.label || key;
     var hidden = document.createElement("input");
     hidden.type = "hidden";
     hidden.name = "stored_queries";
@@ -62,6 +77,7 @@
     item.appendChild(remove);
     list.appendChild(item);
     renderListEmptyState();
+    emitChanged();
   }
 
   function hideResults() {
@@ -85,6 +101,9 @@
       button.disabled = selected.has(key);
       button.setAttribute("data-query-key", key);
       button.setAttribute("data-query-label", query.title || key);
+      button.setAttribute("data-query-description", query.description || "");
+      button.setAttribute("data-query-parameters", JSON.stringify(query.parameters || query.params || []));
+      button.setAttribute("data-query-is-write", query.is_write ? "1" : "0");
       var title = document.createElement("strong");
       title.textContent = query.title || query.name;
       var meta = document.createElement("span");
@@ -137,10 +156,18 @@
     if (!button) {
       return;
     }
-    addStoredQuery(
-      button.getAttribute("data-query-key"),
-      button.getAttribute("data-query-label")
-    );
+    var parameters = [];
+    try {
+      parameters = JSON.parse(button.getAttribute("data-query-parameters") || "[]");
+    } catch (ignore) {
+    }
+    addStoredQuery({
+      key: button.getAttribute("data-query-key"),
+      label: button.getAttribute("data-query-label"),
+      description: button.getAttribute("data-query-description") || "",
+      parameters: parameters,
+      isWrite: button.getAttribute("data-query-is-write") === "1"
+    });
     input.value = "";
     hideResults();
     input.focus();
@@ -156,6 +183,7 @@
     selected.delete(key);
     item.remove();
     renderListEmptyState();
+    emitChanged();
   });
 
   renderListEmptyState();
