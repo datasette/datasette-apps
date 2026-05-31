@@ -5,10 +5,10 @@
 {% block content %}
 <div class="datasette-apps-page-header">
   <h1>Apps</h1>
-  <p><a class="datasette-app-button" href="/-/apps/create">Create app</a></p>
+  <p><a class="datasette-app-button" href="{{ urls.path('/-/apps/create') }}">Create app</a></p>
 </div>
 
-<form class="datasette-apps-search" method="get" action="/-/apps">
+<form class="datasette-apps-search" method="get" action="{{ urls.path('/-/apps') }}">
   <input type="search" name="q" placeholder="Search apps" value="{{ q or '' }}">
   <button type="submit">Search</button>
 </form>
@@ -17,12 +17,12 @@
 {% for app in apps %}
   <li class="datasette-app-list-item{% if app.pinned %} datasette-app-list-item-pinned{% endif %}">
     <div class="datasette-app-list-main">
-      <h2><a href="{{ app.href }}">{{ app.name }}</a></h2>
+      <h2><a href="{{ urls.path(app.href) }}">{{ app.name }}</a></h2>
       {% if app.description %}
         <p>{{ app.description }}</p>
       {% endif %}
     </div>
-    <form class="datasette-app-pin-form" method="post" action="/-/apps/{{ app.id }}/{% if app.pinned %}unpin{% else %}pin{% endif %}">
+    <form class="datasette-app-pin-form" method="post" action="{{ urls.path('/-/apps/' ~ app.id ~ '/' ~ ('unpin' if app.pinned else 'pin')) }}">
       <input type="hidden" name="next" value="{{ current_path }}">
       <button
         class="datasette-app-button datasette-app-pin-button"
@@ -36,6 +36,6 @@
 </ul>
 
 {% if next_url %}
-  <p><a rel="next" href="{{ next_url }}">Next</a></p>
+  <p><a rel="next" href="{{ urls.path(next_url) }}">Next</a></p>
 {% endif %}
 {% endblock %}

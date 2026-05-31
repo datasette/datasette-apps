@@ -6,6 +6,7 @@ from .registry import Registry
 from .views import (
     app_json,
     app_query,
+    app_revision,
     apps_index,
     create_app,
     edit_app,
@@ -25,6 +26,7 @@ def register_routes():
         (r"^/-/apps$", apps_index),
         (r"^/-/apps/create$", create_app),
         (r"^/-/apps/(?P<id>[^/]+)\.json$", app_json),
+        (r"^/-/apps/(?P<id>[^/]+)/revisions/(?P<version>\d+)$", app_revision),
         (r"^/-/apps/(?P<id>[^/]+)/edit$", edit_app),
         (r"^/-/apps/(?P<id>[^/]+)/pin$", pin_app),
         (r"^/-/apps/(?P<id>[^/]+)/unpin$", unpin_app),

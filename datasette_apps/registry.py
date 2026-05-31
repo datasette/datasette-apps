@@ -51,6 +51,36 @@ def _validate_external_id(id):
         raise ValueError("External app IDs must be non-empty safe path segments")
 
 
+APP_COLUMNS = """
+    apps.id,
+    apps.external,
+    apps.name,
+    apps.description,
+    apps.path,
+    apps.source,
+    apps.metadata,
+    apps.actor_id,
+    apps.current_version,
+    apps.created_at,
+    apps.updated_at
+"""
+
+APP_VERSION_COLUMNS = """
+    app_versions.app_id,
+    app_versions.version,
+    app_versions.html,
+    app_versions.created_at
+"""
+
+APP_USER_STATE_COLUMNS = """
+    actor_id,
+    app_id,
+    last_accessed_at,
+    pinned_at,
+    access_count
+"""
+
+
 class Registry:
     def __init__(self, datasette):
         self.datasette = datasette
@@ -184,8 +214,8 @@ class Registry:
     async def get_current_version(self, app_id):
         await self.ensure_tables()
         result = await self.db.execute(
-            """
-            SELECT app_versions.*
+            f"""
+            SELECT {APP_VERSION_COLUMNS}
             FROM app_versions
             JOIN apps ON apps.id = app_versions.app_id
             WHERE apps.id = :app_id
@@ -194,6 +224,36 @@ class Registry:
             {"app_id": app_id},
         )
         return _row_to_version(result.first())
+
+    async def get_version(self, app_id, version):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            f"""
+            SELECT {APP_VERSION_COLUMNS}
+            FROM app_versions
+            JOIN apps ON apps.id = app_versions.app_id
+            WHERE apps.id = :app_id
+              AND apps.external = 0
+              AND app_versions.version = :version
+            """,
+            {"app_id": app_id, "version": version},
+        )
+        return _row_to_version(result.first())
+
+    async def list_versions(self, app_id):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            f"""
+            SELECT {APP_VERSION_COLUMNS}
+            FROM app_versions
+            JOIN apps ON apps.id = app_versions.app_id
+            WHERE apps.id = :app_id
+              AND apps.external = 0
+            ORDER BY app_versions.version DESC
+            """,
+            {"app_id": app_id},
+        )
+        return [_row_to_version(row) for row in result.rows]
 
     async def remove_app(self, id):
         await self.ensure_tables()
@@ -208,7 +268,9 @@ class Registry:
 
     async def get_app(self, id):
         await self.ensure_tables()
-        result = await self.db.execute("SELECT * FROM apps WHERE id = :id", {"id": id})
+        result = await self.db.execute(
+            f"SELECT {APP_COLUMNS} FROM apps WHERE id = :id", {"id": id}
+        )
         return _row_to_app(result.first())
 
     async def list_apps(self, q=None, limit=20, offset=0, actor_id=None):
@@ -240,7 +302,7 @@ class Registry:
             params["actor_id"] = actor_id
         if fts:
             sql = """
-                SELECT apps.* {select_user_state}
+                SELECT {app_columns} {select_user_state}
                 FROM apps
                 JOIN apps_fts ON apps.rowid = apps_fts.rowid
                 {join_user_state}
@@ -248,6 +310,7 @@ class Registry:
                 ORDER BY {order_by}
                 LIMIT :limit OFFSET :offset
             """.format(
+                app_columns=APP_COLUMNS,
                 select_user_state=select_user_state,
                 join_user_state=join_user_state,
                 order_by=order_by,
@@ -255,12 +318,13 @@ class Registry:
             params["q"] = fts
         else:
             sql = """
-                SELECT apps.* {select_user_state}
+                SELECT {app_columns} {select_user_state}
                 FROM apps
                 {join_user_state}
                 ORDER BY {order_by}
                 LIMIT :limit OFFSET :offset
             """.format(
+                app_columns=APP_COLUMNS,
                 select_user_state=select_user_state,
                 join_user_state=join_user_state,
                 order_by=order_by,
@@ -271,8 +335,8 @@ class Registry:
     async def list_pinned_apps(self, actor_id, limit=3):
         await self.ensure_tables()
         result = await self.db.execute(
-            """
-            SELECT apps.*
+            f"""
+            SELECT {APP_COLUMNS}
             FROM apps
             JOIN app_user_state ON app_user_state.app_id = apps.id
             WHERE app_user_state.actor_id = :actor_id
@@ -322,8 +386,8 @@ class Registry:
     async def get_user_state(self, actor_id, app_id):
         await self.ensure_tables()
         result = await self.db.execute(
-            """
-            SELECT *
+            f"""
+            SELECT {APP_USER_STATE_COLUMNS}
             FROM app_user_state
             WHERE actor_id = :actor_id AND app_id = :app_id
             """,

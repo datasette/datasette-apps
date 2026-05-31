@@ -90,6 +90,45 @@ async def test_create_view_and_edit_stored_app():
     assert version["version"] == 2
     assert "Updated" in version["html"]
 
+    edit_form = await datasette.client.get(
+        f"/-/apps/{app_id}/edit", actor={"id": "alice"}
+    )
+    assert "Revision history" in edit_form.text
+    assert f"/-/apps/{app_id}/revisions/2" in edit_form.text
+    assert f"/-/apps/{app_id}/revisions/1" in edit_form.text
+    assert ">v2</a>" in edit_form.text
+    assert ">v1</a>" in edit_form.text
+    first_time_text = (
+        edit_form.text.split("<time", 1)[1].split(">", 1)[1].split("</time>", 1)[0]
+    )
+    assert "T" not in first_time_text
+    assert "+" not in first_time_text
+    assert "current" in edit_form.text
+
+    revision = await datasette.client.get(
+        f"/-/apps/{app_id}/revisions/2", actor={"id": "alice"}
+    )
+    assert revision.status_code == 200
+    assert "v2 of Hello app" in revision.text
+    assert "compared with v1" in revision.text
+    assert "Copy to clipboard" in revision.text
+    assert 'id="revision-html-source" readonly' in revision.text
+    assert "cm.editorFromTextArea" in revision.text
+    assert "cm-readonly" in revision.text
+    assert "&lt;title&gt;Updated&lt;/title&gt;" in revision.text
+    assert "+++ v2" in revision.text
+    assert (
+        "+&lt;!DOCTYPE html&gt;&lt;title&gt;Updated&lt;/title&gt;&lt;h1&gt;Updated&lt;/h1&gt;"
+        in revision.text
+    )
+    assert "<iframe" not in revision.text
+    assert 'id="html-editor"' not in revision.text
+
+    missing_revision = await datasette.client.get(
+        f"/-/apps/{app_id}/revisions/99", actor={"id": "alice"}
+    )
+    assert missing_revision.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_capability_system_removed():

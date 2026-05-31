@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}v{{ version.version }} of {{ app.name }}{% endblock %}
+
+{% block crumbs %}
+{% import "_app_crumbs.html" as app_crumbs with context %}
+{{ app_crumbs.nav(request=request, app=app) }}
+{% endblock %}
+
+{% block extra_head %}
+{{ codemirror_assets|safe }}
+{% endblock %}
+
+{% block content %}
+<div class="datasette-app-view-header">
+  <h1>v{{ version.version }} of {{ app.name }}</h1>
+  <div class="datasette-app-actions">
+    <a class="datasette-app-button" href="{{ urls.path('/-/apps/' ~ app.id ~ '/edit') }}">Edit app</a>
+    <a class="datasette-app-button" href="{{ urls.path(app.path) }}">View app</a>
+  </div>
+</div>
+
+<p class="datasette-app-revision-meta">
+  Created <time datetime="{{ version.created_at }}">{{ version.created_at[:19]|replace("T", " ") }}</time>
+  {% if previous %}
+    compared with v{{ previous.version }}
+  {% else %}
+    compared with an empty file
+  {% endif %}
+</p>
+
+<section class="datasette-app-revision-section">
+  <h2>Diff</h2>
+  <pre class="datasette-app-diff">{%- for line in diff_lines -%}<span{% if line.class %} class="{{ line.class }}"{% endif %}>{{ line.text }}</span>{%- endfor -%}</pre>
+</section>
+
+<section class="datasette-app-revision-section">
+  <div class="datasette-app-revision-source-header">
+    <h2>Full HTML</h2>
+    <button class="datasette-app-button" type="button" data-copy-source="revision-html-source">Copy to clipboard</button>
+  </div>
+  <textarea class="datasette-app-source" id="revision-html-source" readonly>{{ version.html }}</textarea>
+</section>
+
+<script>
+document.addEventListener("click", async function(event) {
+  var button = event.target.closest("[data-copy-source]");
+  if (!button) {
+    return;
+  }
+  var source = document.getElementById(button.getAttribute("data-copy-source"));
+  if (!source) {
+    return;
+  }
+  var text = typeof source.value == "string" ? source.value : source.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (error) {
+    var textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+  button.textContent = "Copied";
+  window.setTimeout(function() {
+    button.textContent = "Copy to clipboard";
+  }, 2000);
+});
+</script>
+{% endblock %}

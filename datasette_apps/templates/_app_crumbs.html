@@ -8,10 +8,10 @@
     <a href="{{ item.href }}">{{ item.label }}</a>
     /
   {% endfor %}
-  <a href="/-/apps">apps</a>
+  <a href="{{ urls.path('/-/apps') }}">apps</a>
   {% if app %}
     /
-    <a href="{{ app.path }}">{{ app.name }}</a>
+    <a href="{{ urls.path(app.path) }}">{{ app.name }}</a>
   {% endif %}
 </p>
 {%- endmacro %}

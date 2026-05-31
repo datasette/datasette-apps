@@ -41,6 +41,11 @@ async def test_app_pages_extend_datasette_base_template():
     await assert_extends_datasette_base(
         await datasette.client.get(f"/-/apps/{app['id']}/edit", actor={"id": "alice"})
     )
+    await assert_extends_datasette_base(
+        await datasette.client.get(
+            f"/-/apps/{app['id']}/revisions/1", actor={"id": "alice"}
+        )
+    )
 
 
 @pytest.mark.asyncio
@@ -72,3 +77,48 @@ async def test_app_pages_show_breadcrumbs_to_apps_list():
         ("/-/apps", "apps"),
         (f"/-/apps/{app['id']}", "Crumb app"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_app_links_respect_base_url():
+    datasette = Datasette(memory=True, settings={"base_url": "/prefix/"})
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Base URL app",
+        description="",
+        html="<h1>Hello</h1>",
+    )
+    await Registry(datasette).update_stored_app(
+        app["id"], "Base URL app", "", "<h1>Updated</h1>"
+    )
+
+    list_response = await datasette.client.get("/-/apps", actor={"id": "alice"})
+    view_response = await datasette.client.get(
+        f"/-/apps/{app['id']}", actor={"id": "alice"}
+    )
+    edit_response = await datasette.client.get(
+        f"/-/apps/{app['id']}/edit", actor={"id": "alice"}
+    )
+    revision_response = await datasette.client.get(
+        f"/-/apps/{app['id']}/revisions/2", actor={"id": "alice"}
+    )
+
+    assert 'href="/prefix/-/apps/create"' in list_response.text
+    assert 'action="/prefix/-/apps"' in list_response.text
+    assert f'href="/prefix/-/apps/{app["id"]}"' in list_response.text
+
+    assert 'href="/prefix/-/apps"' in view_response.text
+    assert f'href="/prefix/-/apps/{app["id"]}/edit"' in view_response.text
+    assert f'action="/prefix/-/apps/{app["id"]}/pin"' in view_response.text
+
+    assert f'href="/prefix/-/apps/{app["id"]}/revisions/2"' in edit_response.text
+    assert f'href="/prefix/-/apps/{app["id"]}/revisions/1"' in edit_response.text
+
+    assert f'href="/prefix/-/apps/{app["id"]}/edit"' in revision_response.text
+    assert f'href="/prefix/-/apps/{app["id"]}"' in revision_response.text
+    assert 'href="/-/apps' not in (
+        list_response.text
+        + view_response.text
+        + edit_response.text
+        + revision_response.text
+    )

@@ -77,4 +77,19 @@
     </aside>
   </div>
 </form>
+
+<section class="datasette-app-revisions">
+  <h2>Revision history</h2>
+  <ol class="datasette-app-revision-list">
+    {% for revision in revisions %}
+      <li>
+        <a href="{{ urls.path('/-/apps/' ~ app.id ~ '/revisions/' ~ revision.version) }}">v{{ revision.version }}</a>
+        {% if revision.version == app.current_version %}
+          <strong>current</strong>
+        {% endif %}
+        <time datetime="{{ revision.created_at }}">{{ revision.created_at[:19]|replace("T", " ") }}</time>
+      </li>
+    {% endfor %}
+  </ol>
+</section>
 {% endblock %}

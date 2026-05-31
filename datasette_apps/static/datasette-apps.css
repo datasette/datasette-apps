@@ -326,6 +326,114 @@
   font-weight: 600;
 }
 
+.datasette-app-revisions {
+  border-top: 1px solid #ddd;
+  margin: 2rem 0;
+  max-width: 980px;
+  padding-top: 1.25rem;
+}
+
+.datasette-app-revisions h2,
+.datasette-app-revision-section h2 {
+  font-size: 1.35rem;
+  margin: 0 0 0.8rem;
+}
+
+.datasette-app-revision-list {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.datasette-app-revision-list li {
+  margin: 0 0 0.55rem;
+}
+
+.datasette-app-revision-list strong {
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.3rem;
+}
+
+.datasette-app-revision-list time,
+.datasette-app-revision-meta {
+  color: rgba(17, 26, 53, 0.72);
+}
+
+.datasette-app-revision-list time {
+  display: block;
+  font-size: 0.9rem;
+  margin-top: 0.1rem;
+}
+
+.datasette-app-revision-section {
+  margin: 1.5rem 0 2rem;
+}
+
+.datasette-app-revision-source-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  margin: 0 0 0.75rem;
+}
+
+.datasette-app-revision-source-header h2 {
+  margin: 0;
+}
+
+.datasette-app-revision-section .cm-editor {
+  max-width: none;
+  min-height: 28rem;
+  width: 100%;
+}
+
+.datasette-app-diff,
+.datasette-app-source {
+  background: #f8f8f8;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin: 0;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.datasette-app-diff {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.datasette-app-source {
+  white-space: pre;
+}
+
+.datasette-app-diff span {
+  display: block;
+  min-height: 1.45em;
+}
+
+.datasette-app-diff-added {
+  background: #e8f5e9;
+  color: #175f24;
+}
+
+.datasette-app-diff-removed {
+  background: #fdecea;
+  color: #8a1f11;
+}
+
+.datasette-app-diff-hunk {
+  color: #5b4b8a;
+  font-weight: 700;
+}
+
 .datasette-apps-homepage {
   margin: 0 0 1.5rem;
 }

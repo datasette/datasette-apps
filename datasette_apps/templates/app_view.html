@@ -11,11 +11,11 @@
 <div class="datasette-app-view-header">
   <h1>{{ app.name }}</h1>
   <div class="datasette-app-actions">
-    <a class="datasette-app-button" href="/-/apps">All apps</a>
+    <a class="datasette-app-button" href="{{ urls.path('/-/apps') }}">All apps</a>
     {% if can_edit %}
-    <a class="datasette-app-button" href="/-/apps/{{ app.id }}/edit">Edit app</a>
+    <a class="datasette-app-button" href="{{ urls.path('/-/apps/' ~ app.id ~ '/edit') }}">Edit app</a>
     {% endif %}
-    <form class="datasette-app-pin-form" method="post" action="/-/apps/{{ app.id }}/{% if pinned %}unpin{% else %}pin{% endif %}">
+    <form class="datasette-app-pin-form" method="post" action="{{ urls.path('/-/apps/' ~ app.id ~ '/' ~ ('unpin' if pinned else 'pin')) }}">
       <input type="hidden" name="next" value="{{ current_path }}">
       <button
         class="datasette-app-button datasette-app-pin-button"

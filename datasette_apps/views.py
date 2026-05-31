@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import html
 import json
 from urllib.parse import urlencode
@@ -43,6 +44,9 @@ def _codemirror_assets():
     min-height: 28rem;
     border: 1px solid #ddd;
   }
+  .cm-editor.cm-readonly .cm-content {
+    cursor: default;
+  }
 </style>
 <script>
 window.addEventListener("DOMContentLoaded", function() {
@@ -53,6 +57,22 @@ window.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 """
+
+
+def _readonly_codemirror_assets(textarea_selector):
+    return _codemirror_assets() + """
+<script>
+window.addEventListener("DOMContentLoaded", function() {
+  var sourceInput = document.querySelector("%s");
+  if (sourceInput && window.cm && window.cm.editorFromTextArea) {
+    var view = cm.editorFromTextArea(sourceInput, {schema: {}});
+    view.dom.classList.add("cm-readonly");
+    view.contentDOM.setAttribute("contenteditable", "false");
+    view.contentDOM.setAttribute("aria-readonly", "true");
+  }
+});
+</script>
+""" % textarea_selector
 
 
 def _app_link(app):
@@ -81,6 +101,29 @@ def _csp_origins_from_post(post):
         for origin in (post.get("csp_origins") or "").splitlines()
         if origin.strip()
     ]
+
+
+def _revision_diff_lines(previous, version):
+    previous_lines = (previous["html"] if previous else "").splitlines()
+    version_lines = version["html"].splitlines()
+    lines = difflib.unified_diff(
+        previous_lines,
+        version_lines,
+        fromfile=f"v{previous['version']}" if previous else "empty",
+        tofile=f"v{version['version']}",
+        lineterm="",
+    )
+    diff_lines = []
+    for line in lines:
+        class_name = ""
+        if line.startswith("+") and not line.startswith("+++"):
+            class_name = "datasette-app-diff-added"
+        elif line.startswith("-") and not line.startswith("---"):
+            class_name = "datasette-app-diff-removed"
+        elif line.startswith("@@"):
+            class_name = "datasette-app-diff-hunk"
+        diff_lines.append({"class": class_name, "text": line})
+    return diff_lines
 
 
 async def _selected_sql_databases(datasette, actor, post):
@@ -232,6 +275,7 @@ async def edit_app(datasette, request):
     await _ensure_app_permission(datasette, actor, "edit-app", app_id)
     if request.method == "GET":
         version = await registry.get_current_version(app_id)
+        revisions = await registry.list_versions(app_id)
         access_mode = await registry.get_access_mode(app_id)
         sql_databases = set(await registry.get_sql_databases(app_id))
         sql_database_options = [
@@ -245,6 +289,7 @@ async def edit_app(datasette, request):
                 {
                     "app": app,
                     "html_source": version["html"],
+                    "revisions": revisions,
                     "access_mode": access_mode,
                     "sql_database_options": sql_database_options,
                     "csp_origins": csp_origins,
@@ -270,6 +315,38 @@ async def edit_app(datasette, request):
     if "csp_origins" in post:
         await registry.set_csp_origins(app_id, _csp_origins_from_post(post))
     return Response.redirect(f"/-/apps/{app_id}")
+
+
+async def app_revision(datasette, request):
+    actor = _require_actor(request)
+    app_id = request.url_vars["id"]
+    revision_number = int(request.url_vars["version"])
+    registry = Registry(datasette)
+    app = await registry.get_app(app_id)
+    if app is None or app["external"]:
+        raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "edit-app", app_id)
+    version = await registry.get_version(app_id, revision_number)
+    if version is None:
+        raise NotFound("Revision not found")
+    previous = None
+    if revision_number > 1:
+        previous = await registry.get_version(app_id, revision_number - 1)
+    return Response.html(
+        await datasette.render_template(
+            "app_revision.html",
+            {
+                "app": app,
+                "version": version,
+                "previous": previous,
+                "diff_lines": _revision_diff_lines(previous, version),
+                "codemirror_assets": _readonly_codemirror_assets(
+                    "textarea#revision-html-source"
+                ),
+            },
+            request=request,
+        )
+    )
 
 
 async def app_json(datasette, request):
