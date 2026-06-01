@@ -86,4 +86,316 @@
 </form>
 
 {{ llm_prompt.prompt(llm_prompt_data) }}
+
+<script>
+(function() {
+  var htmlInput = document.getElementById("html-editor");
+  if (!htmlInput) {
+    return;
+  }
+
+  var autoUpdate = true;
+  var applyingTemplate = false;
+
+  function selectedDatabases() {
+    return Array.prototype.map.call(
+      document.querySelectorAll("input[name='sql_databases']:checked"),
+      function(input) { return input.value; }
+    );
+  }
+
+  function selectedStoredQueries() {
+    return Array.prototype.map.call(
+      document.querySelectorAll(".datasette-app-stored-query-list [data-query-key]"),
+      function(item) {
+        var parameters = [];
+        try {
+          parameters = JSON.parse(item.getAttribute("data-query-parameters") || "[]");
+        } catch (ignore) {
+        }
+        return {
+          key: item.getAttribute("data-query-key"),
+          label: item.getAttribute("data-query-label") || item.getAttribute("data-query-key"),
+          parameters: parameters,
+          isWrite: item.getAttribute("data-query-is-write") === "1"
+        };
+      }
+    );
+  }
+
+  function appTitle() {
+    var input = document.getElementById("app-name");
+    if (input && input.value.trim()) {
+      return input.value.trim();
+    }
+    return "Datasette app";
+  }
+
+  function escapeHtml(value) {
+    return value.replace(/[&<>]/g, function(character) {
+      return {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;"
+      }[character];
+    });
+  }
+
+  function jsString(value) {
+    return JSON.stringify(value);
+  }
+
+  function slug(value, index) {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "item-" + index;
+  }
+
+  function paramsObject(parameters) {
+    var params = {};
+    parameters.forEach(function(parameter) {
+      params[parameter] = "TODO";
+    });
+    return params;
+  }
+
+  function indent(lines, spaces) {
+    var prefix = " ".repeat(spaces);
+    return lines.map(function(line) {
+      return line ? prefix + line : "";
+    });
+  }
+
+  function buildDatabaseMarkup(databases) {
+    if (!databases.length) {
+      return [
+        "    <p>No read-only databases are selected yet.</p>"
+      ];
+    }
+    var lines = [];
+    databases.forEach(function(database, index) {
+      var id = "database-" + slug(database, index);
+      var escapedDatabase = escapeHtml(database);
+      lines.push("    <section>");
+      lines.push("      <h2>Database: " + escapedDatabase + "</h2>");
+      lines.push("      <pre id=\"" + id + "\">Loading...</pre>");
+      lines.push("    </section>");
+    });
+    return lines;
+  }
+
+  function buildStoredQueryMarkup(queries) {
+    if (!queries.length) {
+      return [];
+    }
+    var lines = [];
+    queries.forEach(function(query, index) {
+      var id = "stored-query-" + slug(query.key, index);
+      var escapedKey = escapeHtml(query.key);
+      lines.push("    <section>");
+      lines.push("      <h2>Stored query: " + escapedKey + "</h2>");
+      if (query.isWrite) {
+        lines.push("      <button id=\"" + id + "-button\" type=\"button\">Run stored query</button>");
+        lines.push("      <pre id=\"" + id + "\">Not run yet.</pre>");
+      } else {
+        lines.push("      <pre id=\"" + id + "\">Loading...</pre>");
+      }
+      lines.push("    </section>");
+    });
+    return lines;
+  }
+
+  function buildDatabaseScript(databases) {
+    if (!databases.length) {
+      return [
+        "render('database-status', 'Select a read-only database to enable datasette.query().');"
+      ];
+    }
+    var lines = [];
+    databases.forEach(function(database, index) {
+      var id = "database-" + slug(database, index);
+      var variable = "databaseResult" + index;
+      lines.push("const " + variable + " = await datasette.query(" + jsString(database) + ", \"select name, type from sqlite_master where type in ('table', 'view') order by name limit 10\");");
+      lines.push("render(" + jsString(id) + ", " + variable + ".rows);");
+    });
+    return lines;
+  }
+
+  function buildStoredQueryScript(queries) {
+    if (!queries.length) {
+      return [];
+    }
+    var lines = [];
+    queries.forEach(function(query, index) {
+      var id = "stored-query-" + slug(query.key, index);
+      var params = jsString(paramsObject(query.parameters || []));
+      var variable = "storedQueryResult" + index;
+      if (query.isWrite) {
+        lines.push("document.getElementById(" + jsString(id + "-button") + ").addEventListener('click', async () => {");
+        lines.push("  try {");
+        lines.push("    const " + variable + " = await datasette.storedQuery(" + jsString(query.key) + ", " + params + ");");
+        lines.push("    render(" + jsString(id) + ", " + variable + ");");
+        lines.push("  } catch (error) {");
+        lines.push("    render(" + jsString(id) + ", error.message || String(error));");
+        lines.push("  }");
+        lines.push("});");
+      } else {
+        lines.push("const " + variable + " = await datasette.storedQuery(" + jsString(query.key) + ", " + params + ");");
+        lines.push("render(" + jsString(id) + ", " + variable + ".rows || " + variable + ");");
+      }
+    });
+    return lines;
+  }
+
+  function starterHtml(databases, storedQueries, title) {
+    var databaseMarkup = buildDatabaseMarkup(databases);
+    var storedQueryMarkup = buildStoredQueryMarkup(storedQueries);
+    var databaseScript = buildDatabaseScript(databases);
+    var storedQueryScript = buildStoredQueryScript(storedQueries);
+    var storedQuerySection = storedQueries.length ? [
+      "",
+      "    <h2>Stored query examples</h2>"
+    ].concat(
+      storedQueryMarkup,
+      [
+        "    <pre id=\"stored-query-status\" hidden></pre>"
+      ]
+    ) : [];
+    var escapedTitle = escapeHtml(title);
+    return [
+      "<!DOCTYPE html>",
+      "<html lang=\"en\">",
+      "<head>",
+      "  <meta charset=\"utf-8\">",
+      "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+      "  <title>" + escapedTitle + "</title>",
+      "  <style>",
+      "  body { font-family: Helvetica }",
+      "  pre { background: #f6f6f6; padding: 1rem; white-space: pre-wrap; }",
+      "  button { font: inherit; }",
+      "  </style>",
+      "</head>",
+      "<body>",
+      "  <h1>" + escapedTitle + "</h1>",
+      "  <main>",
+      "    <h2>Read-only SQL examples</h2>"
+    ].concat(
+      databaseMarkup,
+      [
+        "    <pre id=\"database-status\" hidden></pre>"
+      ],
+      storedQuerySection,
+      [
+        "  </main>",
+        "",
+        "  <script>",
+        "  function render(id, value) {",
+        "    const element = document.getElementById(id);",
+        "    element.hidden = false;",
+        "    element.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);",
+        "  }",
+        "",
+        "  async function main() {"
+      ],
+      indent(databaseScript, 4),
+      [""],
+      indent(storedQueryScript, 4),
+      [
+        "  }",
+        "",
+        "  main().catch(error => {",
+        "    render('database-status', error.message || String(error));",
+        "  });",
+        "  <\/script>",
+        "</body>",
+        "</html>",
+        ""
+      ]
+    ).join("\n");
+  }
+
+  function currentEditorText() {
+    if (htmlInput.datasetteAppsEditorView) {
+      return htmlInput.datasetteAppsEditorView.state.doc.toString();
+    }
+    return htmlInput.value;
+  }
+
+  function setEditorText(text) {
+    applyingTemplate = true;
+    if (htmlInput.datasetteAppsEditorView) {
+      var view = htmlInput.datasetteAppsEditorView;
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: text
+        }
+      });
+    }
+    htmlInput.value = text;
+    applyingTemplate = false;
+    htmlInput.dispatchEvent(new Event("input", {bubbles: true}));
+  }
+
+  function updateTemplate() {
+    if (!autoUpdate) {
+      return;
+    }
+    setEditorText(starterHtml(selectedDatabases(), selectedStoredQueries(), appTitle()));
+  }
+
+  function stopAutoUpdate() {
+    if (applyingTemplate) {
+      return;
+    }
+    autoUpdate = false;
+  }
+
+  function watchEditor(view) {
+    if (!view || view.datasetteAppsCreateTemplateWatching) {
+      return;
+    }
+    view.datasetteAppsCreateTemplateWatching = true;
+    var originalDispatch = view.dispatch.bind(view);
+    view.dispatch = function() {
+      var transactions = Array.prototype.slice.call(arguments);
+      var changed = transactions.some(function(transaction) {
+        return transaction && transaction.docChanged;
+      });
+      var result = originalDispatch.apply(null, arguments);
+      if (changed) {
+        stopAutoUpdate();
+      }
+      return result;
+    };
+    view.contentDOM.addEventListener("beforeinput", stopAutoUpdate);
+    view.contentDOM.addEventListener("paste", stopAutoUpdate);
+    view.contentDOM.addEventListener("drop", stopAutoUpdate);
+    view.contentDOM.addEventListener("cut", stopAutoUpdate);
+  }
+
+  function editorReady() {
+    watchEditor(htmlInput.datasetteAppsEditorView);
+    if (!currentEditorText()) {
+      updateTemplate();
+    }
+  }
+
+  document.addEventListener("change", function(event) {
+    if (event.target && event.target.matches("input[name='sql_databases']")) {
+      updateTemplate();
+    }
+  });
+  document.getElementById("app-name").addEventListener("input", updateTemplate);
+  document.addEventListener("datasette-app-stored-queries-changed", updateTemplate);
+  htmlInput.addEventListener("datasette-app-editor-ready", editorReady);
+
+  if (htmlInput.datasetteAppsEditorView) {
+    editorReady();
+  } else {
+    window.addEventListener("DOMContentLoaded", function() {
+      window.setTimeout(editorReady, 0);
+    });
+  }
+})();
+</script>
 {% endblock %}

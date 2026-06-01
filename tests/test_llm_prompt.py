@@ -52,9 +52,27 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     assert 'id="llm-prompt" rows="24" cols="100" readonly></textarea>' in response.text
     assert 'id="llm-prompt-data"' in response.text
     assert "htmlInput.datasetteAppsEditorView = cm.editorFromTextArea" in response.text
+    assert "datasette-app-editor-ready" in response.text
     assert "function buildPrompt()" in response.text
     assert "function markdownFenceFor(text)" in response.text
     assert "Current app HTML" in response.text
+    assert "function selectedSchema(databases)" in response.text
+    assert "schema_by_database" in response.text
+    assert "Available schema for the selected read-only SQL databases" in response.text
+    assert (
+        "No read-only SQL databases are currently selected, so no table schema is included."
+        in response.text
+    )
+    assert "Allowed external network and asset origins" in response.text
+    assert "exact https:// origins for fetch()" in response.text
+    assert "function starterHtml(databases, storedQueries, title)" in response.text
+    assert "var storedQuerySection = storedQueries.length" in response.text
+    assert "No stored queries are selected yet." not in response.text
+    assert "function appTitle()" in response.text
+    assert "function escapeHtml(value)" in response.text
+    assert "function stopAutoUpdate()" in response.text
+    assert "body { font-family: Helvetica }" in response.text
+    assert "select name, type from sqlite_master" in response.text
     assert "datasette.query(database, sql, params?)" in response.text
     assert "datasette.storedQuery(database, query, params?)" in response.text
     assert 'datasette.storedQuery(\\"database/query\\", params?)' in response.text
@@ -71,7 +89,7 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     )
     assert "history.replaceState()" in response.text
     assert "history.pushState()" in response.text
-    assert "Database: content" in response.text
+    assert '"schema_by_database": {"content": "Database: content' in response.text
     assert "table: news" in response.text
     assert "title TEXT" in response.text
     assert "author_id -\\u003e authors.id" in response.text

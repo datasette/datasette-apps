@@ -85,6 +85,14 @@
     return lines.join("\n");
   }
 
+  function networkOriginLines(origins) {
+    if (!origins.length) {
+      return "No external network or asset origins are currently selected for this app.";
+    }
+    return "The app may use these exact https:// origins for fetch(), remote images, external scripts, and external styles:\n" +
+      origins.map(function(origin) { return "- " + origin; }).join("\n");
+  }
+
   function appSummary() {
     var nameInput = document.getElementById("app-name");
     var descriptionInput = document.getElementById("app-description");
@@ -127,6 +135,20 @@
     return "Current app HTML:\n\n" + fence + "html\n" + html + "\n" + fence;
   }
 
+  function selectedSchema(databases) {
+    var schemaByDatabase = promptData.schema_by_database || {};
+    if (!databases.length) {
+      return "No read-only SQL databases are currently selected, so no table schema is included.";
+    }
+    var schemas = databases.map(function(database) {
+      return schemaByDatabase[database];
+    }).filter(Boolean);
+    if (!schemas.length) {
+      return "No table schema is visible for the currently selected databases.";
+    }
+    return schemas.join("\n");
+  }
+
   function buildPrompt() {
     var databases = checkedValues("input[name='sql_databases']:checked");
     var origins = networkOrigins();
@@ -161,11 +183,11 @@
       listOrFallback(databases, "No read-only SQL databases are currently selected for this app.") + "\n\n" +
       "Currently selected stored queries:\n\n" +
       storedQueryLines(storedQueries) + "\n\n" +
-      "Currently selected external network origins:\n\n" +
-      listOrFallback(origins, "No external network origins are currently selected for this app.") + "\n\n" +
+      "Allowed external network and asset origins:\n\n" +
+      networkOriginLines(origins) + "\n\n" +
       "These selections reflect the current form state. If you have changed access settings, save this page before the running app can use those changes.\n\n" +
-      "Available schema for this actor:\n\n" +
-      (promptData.schema || "No tables or views are visible to the current actor.") + "\n\n" +
+      "Available schema for the selected read-only SQL databases:\n\n" +
+      selectedSchema(databases) + "\n\n" +
       currentHtmlBlock() + "\n\n" +
       "Small example:\n\n" +
       "<!DOCTYPE html>\n" +
@@ -173,6 +195,9 @@
       "<head>\n" +
       "  <meta charset=\"utf-8\">\n" +
       "  <title>Example Datasette app</title>\n" +
+      "  <style>\n" +
+      "  body { font-family: Helvetica }\n" +
+      "  </style>\n" +
       "</head>\n" +
       "<body>\n" +
       "  <h1>Recent rows</h1>\n" +

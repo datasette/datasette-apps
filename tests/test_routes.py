@@ -221,6 +221,7 @@ async def test_revision_pages_show_non_html_changes_without_empty_diff():
         ],
     )
 
+
 @pytest.mark.asyncio
 async def test_capability_system_removed():
     datasette = Datasette(memory=True)

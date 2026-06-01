@@ -53,6 +53,7 @@ window.addEventListener("DOMContentLoaded", function() {
   var htmlInput = document.querySelector("textarea#html-editor");
   if (htmlInput && window.cm && window.cm.editorFromTextArea) {
     htmlInput.datasetteAppsEditorView = cm.editorFromTextArea(htmlInput, {schema: {}});
+    htmlInput.dispatchEvent(new CustomEvent("datasette-app-editor-ready", {bubbles: true}));
   }
 });
 </script>
