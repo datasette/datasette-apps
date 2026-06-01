@@ -45,6 +45,8 @@
 {% endblock %}
 
 {% block content %}
+{% import "_stored_query_picker.html" as stored_query_picker %}
+{% import "_llm_prompt.html" as llm_prompt %}
 <h1>Edit {{ app.name }}</h1>
 
 <form class="datasette-app-form datasette-app-edit-form" method="post">
@@ -95,6 +97,11 @@
         </fieldset>
       </div>
 
+      <h2>Stored query access</h2>
+      <div class="datasette-app-form-row">
+        {{ stored_query_picker.picker(stored_query_options, query_search_url) }}
+      </div>
+
       <h2>Network access</h2>
       <div class="datasette-app-form-row">
         <label for="app-csp-origins">Allowed network and asset origins</label>
@@ -110,6 +117,8 @@
     </aside>
   </div>
 </form>
+
+{{ llm_prompt.prompt(llm_prompt_data) }}
 
 <section class="datasette-app-revisions">
   <h2>Revision history</h2>

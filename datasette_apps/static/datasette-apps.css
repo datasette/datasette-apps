@@ -195,6 +195,7 @@
 }
 
 .datasette-app-form input[type="text"],
+.datasette-app-form input[type="search"],
 .datasette-app-form select,
 .datasette-app-form textarea,
 .datasette-app-llm-prompt textarea {
@@ -205,6 +206,7 @@
 }
 
 .datasette-app-form input[type="text"],
+.datasette-app-form input[type="search"],
 .datasette-app-form select,
 .datasette-app-form textarea {
   border: 1px solid #bbb;
@@ -219,6 +221,99 @@
 
 .datasette-app-form select {
   background: #fff;
+}
+
+.datasette-app-stored-query-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+}
+
+.datasette-app-stored-query-list li {
+  align-items: center;
+  background: #f7f7f7;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  display: flex;
+  gap: 0.45rem;
+  justify-content: space-between;
+  padding: 0.35rem 0.45rem 0.35rem 0.65rem;
+}
+
+.datasette-app-stored-query-list span {
+  overflow-wrap: anywhere;
+}
+
+.datasette-app-stored-query-list button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 999px;
+  color: #6b2323;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font: inherit;
+  font-weight: 700;
+  height: 1.55rem;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 1.55rem;
+}
+
+.datasette-app-stored-query-results {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-top: 0.35rem;
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.datasette-app-stored-query-results p {
+  color: rgba(17, 26, 53, 0.72);
+  margin: 0;
+  padding: 0.65rem;
+}
+
+.datasette-app-stored-query-results button {
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #eee;
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  width: 100%;
+}
+
+.datasette-app-stored-query-results button:last-child {
+  border-bottom: 0;
+}
+
+.datasette-app-stored-query-results button:hover,
+.datasette-app-stored-query-results button:focus {
+  background: #f4f8fb;
+}
+
+.datasette-app-stored-query-results button:disabled {
+  color: rgba(17, 26, 53, 0.45);
+  cursor: default;
+}
+
+.datasette-app-stored-query-results strong,
+.datasette-app-stored-query-results span {
+  display: block;
+}
+
+.datasette-app-stored-query-results span {
+  color: rgba(17, 26, 53, 0.68);
+  font-size: 0.85rem;
 }
 
 .datasette-app-form-actions {

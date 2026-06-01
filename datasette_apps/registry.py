@@ -24,6 +24,7 @@ def _row_to_app(row):
         return None
     app = dict(row)
     app["metadata"] = _decode_json(app["metadata"], {})
+    app["stored_queries"] = _decode_json(app.get("stored_queries"), [])
     return app
 
 
@@ -39,10 +40,15 @@ def _row_to_version(row):
     version = dict(row)
     version["changed_fields"] = _decode_json(version.get("changed_fields"), [])
     version["sql_databases"] = _decode_json(version.get("sql_databases"), [])
+    version["stored_queries"] = _decode_json(version.get("stored_queries"), [])
     version["csp_origins"] = _decode_json(version.get("csp_origins"), [])
     if version.get("revision_sql_databases") is not None:
         version["revision_sql_databases"] = _decode_json(
             version["revision_sql_databases"], []
+        )
+    if version.get("revision_stored_queries") is not None:
+        version["revision_stored_queries"] = _decode_json(
+            version["revision_stored_queries"], []
         )
     if version.get("revision_csp_origins") is not None:
         version["revision_csp_origins"] = _decode_json(
@@ -57,6 +63,7 @@ APP_REVISION_VALUE_FIELDS = (
     "html",
     "is_private",
     "sql_databases",
+    "stored_queries",
     "csp_origins",
 )
 
@@ -66,6 +73,7 @@ APP_REVISION_CHANGED_FIELDS = [
     "html",
     "is_private",
     "sql_databases",
+    "stored_queries",
     "csp_origins",
 ]
 
@@ -73,7 +81,7 @@ _UNSET = object()
 
 
 def _revision_db_value(field, value):
-    if field in {"sql_databases", "csp_origins"}:
+    if field in {"sql_databases", "stored_queries", "csp_origins"}:
         return json.dumps(value, sort_keys=True)
     if field == "is_private":
         return int(bool(value))
@@ -98,9 +106,9 @@ def _insert_revision(conn, app_id, changes, now, actor_id=None):
         """
         INSERT INTO app_revisions (
             app_id, version, actor_id, name, description, html, is_private,
-            sql_databases, csp_origins, changed_fields, created_at
+            sql_databases, stored_queries, csp_origins, changed_fields, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             app_id,
@@ -111,6 +119,7 @@ def _insert_revision(conn, app_id, changes, now, actor_id=None):
             values["html"],
             values["is_private"],
             values["sql_databases"],
+            values["stored_queries"],
             values["csp_origins"],
             json.dumps(changed_fields),
             now,
@@ -150,6 +159,7 @@ APP_COLUMNS = """
     apps.metadata,
     apps.actor_id,
     apps.is_private,
+    apps.stored_queries,
     apps.current_version,
     apps.created_at,
     apps.updated_at
@@ -164,6 +174,7 @@ APP_REVISION_RESOLVED_COLUMNS = """
     app_revisions.html AS revision_html,
     app_revisions.is_private AS revision_is_private,
     app_revisions.sql_databases AS revision_sql_databases,
+    app_revisions.stored_queries AS revision_stored_queries,
     app_revisions.csp_origins AS revision_csp_origins,
     app_revisions.changed_fields,
     app_revisions.created_at,
@@ -213,6 +224,15 @@ APP_REVISION_RESOLVED_COLUMNS = """
         LIMIT 1
     ) AS sql_databases,
     (
+        SELECT previous.stored_queries
+        FROM app_revisions AS previous
+        WHERE previous.app_id = app_revisions.app_id
+          AND previous.version <= app_revisions.version
+          AND previous.stored_queries IS NOT NULL
+        ORDER BY previous.version DESC
+        LIMIT 1
+    ) AS stored_queries,
+    (
         SELECT previous.csp_origins
         FROM app_revisions AS previous
         WHERE previous.app_id = app_revisions.app_id
@@ -259,11 +279,12 @@ class Registry:
             """
             INSERT INTO apps (
                 id, external, name, description, path, source, metadata,
-                actor_id, is_private, current_version, created_at, updated_at
+                actor_id, is_private, stored_queries, current_version, created_at,
+                updated_at
             )
             VALUES (
                 :id, 1, :name, :description, :path, :source, :metadata,
-                NULL, 0, NULL, :now, :now
+                NULL, 0, '[]', NULL, :now, :now
             )
             ON CONFLICT(id) DO UPDATE SET
                 external = 1,
@@ -305,12 +326,14 @@ class Registry:
         html,
         is_private=True,
         sql_databases=None,
+        stored_queries=None,
         csp_origins=None,
     ):
         await self.ensure_tables()
         app_id = monotonic_ulid()
         now = _now()
         sql_databases = sorted(dict.fromkeys(sql_databases or []))
+        stored_queries = sorted(dict.fromkeys(stored_queries or []))
         csp_origins = sorted(
             dict.fromkeys(
                 normalize_connect_origin(origin) for origin in csp_origins or []
@@ -323,9 +346,10 @@ class Registry:
                 """
                 INSERT INTO apps (
                     id, external, name, description, path, source, metadata,
-                    actor_id, is_private, current_version, created_at, updated_at
+                    actor_id, is_private, stored_queries, current_version, created_at,
+                    updated_at
                 )
-                VALUES (?, 0, ?, ?, ?, 'datasette-apps', '{}', ?, ?, 1, ?, ?)
+                VALUES (?, 0, ?, ?, ?, 'datasette-apps', '{}', ?, ?, ?, 1, ?, ?)
                 """,
                 (
                     app_id,
@@ -334,6 +358,7 @@ class Registry:
                     f"/-/apps/{app_id}",
                     actor_id,
                     is_private,
+                    json.dumps(stored_queries),
                     now,
                     now,
                 ),
@@ -342,10 +367,10 @@ class Registry:
                 """
                 INSERT INTO app_revisions (
                     app_id, version, actor_id, name, description, html,
-                    is_private, sql_databases, csp_origins, changed_fields,
-                    created_at
+                    is_private, sql_databases, stored_queries, csp_origins,
+                    changed_fields, created_at
                 )
-                VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     app_id,
@@ -355,6 +380,7 @@ class Registry:
                     html,
                     is_private,
                     json.dumps(sql_databases),
+                    json.dumps(stored_queries),
                     json.dumps(csp_origins),
                     json.dumps(APP_REVISION_CHANGED_FIELDS),
                     now,
@@ -392,6 +418,7 @@ class Registry:
         *,
         is_private=_UNSET,
         sql_databases=_UNSET,
+        stored_queries=_UNSET,
         csp_origins=_UNSET,
     ):
         await self.ensure_tables()
@@ -401,6 +428,8 @@ class Registry:
             is_private = int(bool(is_private))
         if sql_databases is not _UNSET:
             sql_databases = sorted(dict.fromkeys(sql_databases))
+        if stored_queries is not _UNSET:
+            stored_queries = sorted(dict.fromkeys(stored_queries))
         if csp_origins is not _UNSET:
             csp_origins = sorted(
                 dict.fromkeys(
@@ -411,7 +440,8 @@ class Registry:
         def save(conn):
             row = conn.execute(
                 """
-                SELECT current_version, external, name, description, is_private
+                SELECT current_version, external, name, description, is_private,
+                       stored_queries
                 FROM apps
                 WHERE id = ?
                 """,
@@ -456,6 +486,10 @@ class Registry:
                 ]
                 if current_sql_databases != sql_databases:
                     changes["sql_databases"] = sql_databases
+            if stored_queries is not _UNSET:
+                current_stored_queries = _decode_json(row["stored_queries"], [])
+                if current_stored_queries != stored_queries:
+                    changes["stored_queries"] = stored_queries
             if csp_origins is not _UNSET:
                 current_csp_origins = [
                     current_row["origin"]
@@ -511,6 +545,7 @@ class Registry:
                 "name",
                 "description",
                 "is_private",
+                "stored_queries",
             } & changes.keys():
                 conn.execute(
                     """
@@ -518,6 +553,7 @@ class Registry:
                     SET name = ?,
                         description = ?,
                         is_private = ?,
+                        stored_queries = ?,
                         updated_at = ?
                     WHERE id = ?
                     """,
@@ -525,6 +561,11 @@ class Registry:
                         name,
                         description,
                         is_private if is_private is not _UNSET else row["is_private"],
+                        (
+                            json.dumps(stored_queries)
+                            if stored_queries is not _UNSET
+                            else row["stored_queries"]
+                        ),
                         now,
                         app_id,
                     ),
@@ -789,6 +830,52 @@ class Registry:
             {"app_id": app_id},
         )
         return [row["database_name"] for row in result.rows]
+
+    async def get_stored_queries(self, app_id):
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT stored_queries
+            FROM apps
+            WHERE id = :app_id
+            """,
+            {"app_id": app_id},
+        )
+        row = result.first()
+        return _decode_json(row["stored_queries"], []) if row else []
+
+    async def set_stored_queries(self, app_id, stored_queries, actor_id=None):
+        await self.ensure_tables()
+        now = _now()
+        stored_queries = sorted(dict.fromkeys(stored_queries))
+
+        def save(conn):
+            row = conn.execute(
+                "SELECT stored_queries FROM apps WHERE id = ?", (app_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(app_id)
+            current = _decode_json(row["stored_queries"], [])
+            if current == stored_queries:
+                return
+            conn.execute(
+                """
+                UPDATE apps
+                SET stored_queries = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (json.dumps(stored_queries), now, app_id),
+            )
+            _insert_revision(
+                conn,
+                app_id,
+                {"stored_queries": stored_queries},
+                now,
+                actor_id=actor_id,
+            )
+
+        await self.db.execute_write_fn(save)
 
     async def set_sql_databases(self, app_id, database_names, actor_id=None):
         await self.ensure_tables()

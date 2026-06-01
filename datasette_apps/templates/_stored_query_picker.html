@@ -1,0 +1,192 @@
+{% macro picker(stored_query_options, query_search_url) %}
+<div class="datasette-app-stored-query-picker" data-query-search-url="{{ query_search_url }}">
+  <input type="hidden" name="stored_queries_present" value="1">
+  <label for="stored-query-search">Stored queries</label>
+  <p class="datasette-app-form-help">
+    Pick stored queries this app can run. Changes take effect after you save this page.
+  </p>
+  <div class="datasette-app-stored-query-search-row">
+    <input id="stored-query-search" type="search" autocomplete="off" placeholder="Search stored queries">
+  </div>
+  <div class="datasette-app-stored-query-results" hidden></div>
+  <ul class="datasette-app-stored-query-list">
+    {% for stored_query in stored_query_options %}
+      <li
+        data-query-key="{{ stored_query.key }}"
+        data-query-label="{{ stored_query.label }}"
+        data-query-description="{{ stored_query.description }}"
+        data-query-parameters='{{ stored_query.parameters|tojson }}'
+        data-query-is-write="{{ '1' if stored_query.is_write else '0' }}"
+      >
+        <span>{{ stored_query.label }}</span>
+        <input type="hidden" name="stored_queries" value="{{ stored_query.key }}">
+        <button type="button" aria-label="Remove {{ stored_query.key }}">&times;</button>
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+<script>
+(function() {
+  var picker = document.querySelector(".datasette-app-stored-query-picker");
+  if (!picker) {
+    return;
+  }
+  var searchUrl = picker.getAttribute("data-query-search-url");
+  var input = picker.querySelector("input[type='search']");
+  var results = picker.querySelector(".datasette-app-stored-query-results");
+  var list = picker.querySelector(".datasette-app-stored-query-list");
+  var selected = new Set(Array.prototype.map.call(
+    list.querySelectorAll("[data-query-key]"),
+    function(item) { return item.getAttribute("data-query-key"); }
+  ));
+  var pendingController = null;
+  var lastQuery = "";
+
+  function renderListEmptyState() {
+    list.hidden = selected.size === 0;
+  }
+
+  function emitChanged() {
+    document.dispatchEvent(new CustomEvent("datasette-app-stored-queries-changed"));
+  }
+
+  function addStoredQuery(query) {
+    var key = query.key;
+    if (!key || selected.has(key)) {
+      return;
+    }
+    selected.add(key);
+    var item = document.createElement("li");
+    item.setAttribute("data-query-key", key);
+    item.setAttribute("data-query-label", query.label || key);
+    item.setAttribute("data-query-description", query.description || "");
+    item.setAttribute("data-query-parameters", JSON.stringify(query.parameters || []));
+    item.setAttribute("data-query-is-write", query.isWrite ? "1" : "0");
+    var text = document.createElement("span");
+    text.textContent = query.label || key;
+    var hidden = document.createElement("input");
+    hidden.type = "hidden";
+    hidden.name = "stored_queries";
+    hidden.value = key;
+    var remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Remove " + key);
+    remove.innerHTML = "&times;";
+    item.appendChild(text);
+    item.appendChild(hidden);
+    item.appendChild(remove);
+    list.appendChild(item);
+    renderListEmptyState();
+    emitChanged();
+  }
+
+  function hideResults() {
+    results.hidden = true;
+    results.textContent = "";
+  }
+
+  function renderResults(queries) {
+    results.textContent = "";
+    if (!queries.length) {
+      var empty = document.createElement("p");
+      empty.textContent = "No matching stored queries";
+      results.appendChild(empty);
+      results.hidden = false;
+      return;
+    }
+    queries.forEach(function(query) {
+      var key = query.database + "/" + query.name;
+      var button = document.createElement("button");
+      button.type = "button";
+      button.disabled = selected.has(key);
+      button.setAttribute("data-query-key", key);
+      button.setAttribute("data-query-label", query.title || key);
+      button.setAttribute("data-query-description", query.description || "");
+      button.setAttribute("data-query-parameters", JSON.stringify(query.parameters || query.params || []));
+      button.setAttribute("data-query-is-write", query.is_write ? "1" : "0");
+      var title = document.createElement("strong");
+      title.textContent = query.title || query.name;
+      var meta = document.createElement("span");
+      meta.textContent = key + (query.is_write ? " - writable" : "");
+      button.appendChild(title);
+      button.appendChild(meta);
+      results.appendChild(button);
+    });
+    results.hidden = false;
+  }
+
+  async function search() {
+    var q = input.value.trim();
+    lastQuery = q;
+    if (!q) {
+      hideResults();
+      return;
+    }
+    if (pendingController) {
+      pendingController.abort();
+    }
+    pendingController = new AbortController();
+    try {
+      var response = await fetch(searchUrl + "?q=" + encodeURIComponent(q), {
+        credentials: "same-origin",
+        signal: pendingController.signal
+      });
+      if (!response.ok) {
+        throw new Error("Search failed");
+      }
+      var json = await response.json();
+      if (q === lastQuery) {
+        renderResults(json.queries || []);
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        results.textContent = "Stored query search failed";
+        results.hidden = false;
+      }
+    }
+  }
+
+  input.addEventListener("input", function() {
+    window.clearTimeout(input._storedQueryTimer);
+    input._storedQueryTimer = window.setTimeout(search, 180);
+  });
+
+  results.addEventListener("click", function(event) {
+    var button = event.target.closest("button[data-query-key]");
+    if (!button) {
+      return;
+    }
+    var parameters = [];
+    try {
+      parameters = JSON.parse(button.getAttribute("data-query-parameters") || "[]");
+    } catch (ignore) {
+    }
+    addStoredQuery({
+      key: button.getAttribute("data-query-key"),
+      label: button.getAttribute("data-query-label"),
+      description: button.getAttribute("data-query-description") || "",
+      parameters: parameters,
+      isWrite: button.getAttribute("data-query-is-write") === "1"
+    });
+    input.value = "";
+    hideResults();
+    input.focus();
+  });
+
+  list.addEventListener("click", function(event) {
+    var button = event.target.closest("button");
+    if (!button) {
+      return;
+    }
+    var item = button.closest("[data-query-key]");
+    var key = item.getAttribute("data-query-key");
+    selected.delete(key);
+    item.remove();
+    renderListEmptyState();
+    emitChanged();
+  });
+
+  renderListEmptyState();
+})();
+</script>
+{% endmacro %}

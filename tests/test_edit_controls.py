@@ -26,6 +26,10 @@ async def test_create_form_shows_access_data_and_network_controls():
     assert "Read-only SQL query databases" in response.text
     assert 'name="sql_databases"' in response.text
     assert 'value="_memory"' in response.text
+    assert "Stored query access" in response.text
+    assert 'data-query-search-url="/-/queries.json"' in response.text
+    assert 'name="stored_queries_present"' in response.text
+    assert "Changes take effect after you save this page" in response.text
     assert "Network access" in response.text
     assert "Enter exact https:// origins" in response.text
     assert "external scripts" in response.text
@@ -59,6 +63,7 @@ async def test_create_form_saves_access_data_and_network_controls():
             "is_private": "0",
             "sql_databases_present": "1",
             "sql_databases": "_memory",
+            "stored_queries_present": "1",
             "csp_origins": "https://api.github.com\n",
         },
     )
@@ -67,6 +72,7 @@ async def test_create_form_saves_access_data_and_network_controls():
     app_id = response.headers["location"].rsplit("/", 1)[-1]
     assert await registry.get_access_mode(app_id) == "not-private"
     assert await registry.get_sql_databases(app_id) == ["_memory"]
+    assert await registry.get_stored_queries(app_id) == []
     assert await registry.get_csp_origins(app_id) == ["https://api.github.com"]
 
     bob = await datasette.client.get(response.headers["location"], actor={"id": "bob"})
@@ -103,6 +109,10 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert "Read-only SQL query databases" in response.text
     assert 'name="sql_databases"' in response.text
     assert 'value="_memory"' in response.text
+    assert "Stored query access" in response.text
+    assert 'data-query-search-url="/-/queries.json"' in response.text
+    assert 'name="stored_queries_present"' in response.text
+    assert "Changes take effect after you save this page" in response.text
     assert "Network access" in response.text
     assert "Enter exact https:// origins" in response.text
     assert "external scripts" in response.text
@@ -123,6 +133,14 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
 @pytest.mark.asyncio
 async def test_edit_form_saves_sql_database_and_csp():
     datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+    await datasette.add_query(
+        "_memory",
+        "saved_report",
+        "select 1",
+        source="user",
+        owner_id="alice",
+    )
     registry = Registry(datasette)
     app = await registry.create_stored_app(
         actor_id="alice",
@@ -141,12 +159,15 @@ async def test_edit_form_saves_sql_database_and_csp():
             "is_private": "1",
             "sql_databases_present": "1",
             "sql_databases": "_memory",
+            "stored_queries_present": "1",
+            "stored_queries": "_memory/saved_report",
             "csp_origins": "https://api.github.com\n",
         },
     )
 
     assert response.status_code == 302
     assert await registry.get_sql_databases(app["id"]) == ["_memory"]
+    assert await registry.get_stored_queries(app["id"]) == ["_memory/saved_report"]
     assert await registry.get_csp_origins(app["id"]) == ["https://api.github.com"]
 
 
@@ -170,6 +191,7 @@ async def test_edit_form_records_one_revision_for_one_save():
             "html": "<h1>After</h1>",
             "is_private": "0",
             "sql_databases_present": "1",
+            "stored_queries_present": "1",
             "csp_origins": "",
         },
     )
@@ -202,6 +224,7 @@ async def test_edit_form_not_private_access_mode_allows_actor_with_view_app():
             "html": "<h1>Shared</h1>",
             "is_private": "0",
             "sql_databases_present": "1",
+            "stored_queries_present": "1",
             "csp_origins": "",
         },
     )

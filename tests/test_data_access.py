@@ -183,3 +183,110 @@ async def test_datasette_query_allows_granted_views(tmp_path):
     )
     assert allowed.json()["ok"] is True
     assert allowed.json()["result"]["rows"] == [{"title": "First"}, {"title": "Second"}]
+
+
+@pytest.mark.asyncio
+async def test_datasette_stored_query_runs_allow_listed_query(tmp_path):
+    datasette = Datasette([str(create_database(tmp_path))])
+    await datasette.invoke_startup()
+    await datasette.add_query(
+        "content",
+        "news_by_id",
+        "select title from news where id = :id",
+        source="user",
+        owner_id="alice",
+    )
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Stored query app",
+        description="",
+        html="",
+        stored_queries=["content/news_by_id"],
+    )
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/query",
+        actor={"id": "alice"},
+        json={
+            "database": "content",
+            "query": "news_by_id",
+            "params": {"id": 2},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "result": {
+            "columns": ["title"],
+            "rows": [{"title": "Second"}],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_datasette_stored_query_denies_unallow_listed_query(tmp_path):
+    datasette = Datasette([str(create_database(tmp_path))])
+    await datasette.invoke_startup()
+    await datasette.add_query(
+        "content",
+        "news_by_id",
+        "select title from news where id = :id",
+        source="user",
+        owner_id="alice",
+    )
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Stored query app",
+        description="",
+        html="",
+    )
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/query",
+        actor={"id": "alice"},
+        json={
+            "database": "content",
+            "query": "news_by_id",
+            "params": {"id": 2},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert "not allowed" in response.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_datasette_stored_query_intersects_actor_permissions(tmp_path):
+    datasette = Datasette([str(create_database(tmp_path))], default_deny=True)
+    await datasette.invoke_startup()
+    await datasette.add_query(
+        "content",
+        "news_by_id",
+        "select title from news where id = :id",
+        source="user",
+        owner_id="alice",
+    )
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Stored query app",
+        description="",
+        html="",
+        stored_queries=["content/news_by_id"],
+    )
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/query",
+        actor={"id": "alice"},
+        json={
+            "database": "content",
+            "query": "news_by_id",
+            "params": {"id": 2},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert "Permission denied" in response.json()["error"]

@@ -6,12 +6,12 @@ import json
 from urllib.parse import urlencode
 
 from datasette import Forbidden, NotFound, Response
-from datasette.resources import DatabaseResource
+from datasette.resources import DatabaseResource, QueryResource
 
 from .csp import build_csp
-from .data_access import AppQueryError, run_app_query
+from .data_access import AppQueryError, run_app_query, run_app_stored_query
 from .permissions import AppResource, AppsResource
-from .prompt import build_llm_prompt
+from .prompt import build_llm_prompt_data, stored_query_options
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
 from .registry import Registry
 
@@ -52,7 +52,8 @@ def _codemirror_assets():
 window.addEventListener("DOMContentLoaded", function() {
   var htmlInput = document.querySelector("textarea#html-editor");
   if (htmlInput && window.cm && window.cm.editorFromTextArea) {
-    cm.editorFromTextArea(htmlInput, {schema: {}});
+    htmlInput.datasetteAppsEditorView = cm.editorFromTextArea(htmlInput, {schema: {}});
+    htmlInput.dispatchEvent(new CustomEvent("datasette-app-editor-ready", {bubbles: true}));
   }
 });
 </script>
@@ -138,6 +139,7 @@ _REVISION_FIELD_LABELS = {
     "html": "HTML",
     "is_private": "Privacy",
     "sql_databases": "Read-only data access",
+    "stored_queries": "Stored query access",
     "csp_origins": "Network access",
 }
 
@@ -145,7 +147,7 @@ _REVISION_FIELD_LABELS = {
 def _revision_value_for_display(field, value):
     if field == "is_private" and value is not None:
         return {"text": "Private" if value else "Not private", "empty": False}
-    if field in {"sql_databases", "csp_origins"}:
+    if field in {"sql_databases", "stored_queries", "csp_origins"}:
         value = "\n".join(value) if value else ""
     if value in {None, ""}:
         return {"text": "- unset -", "empty": True}
@@ -182,6 +184,30 @@ async def _selected_sql_databases(datasette, actor, post):
         for database_name in post.getlist("sql_databases")
         if database_name in visible_database_names
     ]
+
+
+async def _selected_stored_queries(datasette, actor, post):
+    selected = []
+    seen = set()
+    for value in post.getlist("stored_queries"):
+        value = value.strip()
+        if "/" not in value or value in seen:
+            continue
+        database_name, query_name = value.split("/", 1)
+        if not database_name or not query_name:
+            continue
+        stored_query = await datasette.get_query(database_name, query_name)
+        if stored_query is None:
+            continue
+        if not await datasette.allowed(
+            action="view-query",
+            resource=QueryResource(database=database_name, query=query_name),
+            actor=actor,
+        ):
+            continue
+        seen.add(value)
+        selected.append(value)
+    return selected
 
 
 async def _redirect_after_pin(request):
@@ -248,7 +274,6 @@ async def create_app(datasette, request):
     ):
         raise Forbidden("Permission denied: create-app")
     if request.method == "GET":
-        prompt = await build_llm_prompt(datasette, actor)
         sql_database_options = [
             {"name": database_name, "selected": False}
             for database_name in await _visible_database_names(datasette, actor)
@@ -257,8 +282,10 @@ async def create_app(datasette, request):
             await datasette.render_template(
                 "app_create.html",
                 {
-                    "llm_prompt": prompt,
+                    "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
                     "sql_database_options": sql_database_options,
+                    "stored_query_options": [],
+                    "query_search_url": datasette.urls.path("/-/queries.json"),
                     "codemirror_assets": _codemirror_assets(),
                 },
                 request=request,
@@ -272,6 +299,9 @@ async def create_app(datasette, request):
     sql_databases = []
     if "sql_databases_present" in post:
         sql_databases = await _selected_sql_databases(datasette, actor, post)
+    stored_queries = []
+    if "stored_queries_present" in post:
+        stored_queries = await _selected_stored_queries(datasette, actor, post)
     csp_origins = []
     if "csp_origins" in post:
         csp_origins = _csp_origins_from_post(post)
@@ -282,6 +312,7 @@ async def create_app(datasette, request):
         html=post.get("html") or "",
         is_private=access_mode == "private",
         sql_databases=sql_databases,
+        stored_queries=stored_queries,
         csp_origins=csp_origins,
     )
     return Response.redirect(app["path"])
@@ -348,6 +379,7 @@ async def edit_app(datasette, request):
             {"name": database_name, "selected": database_name in sql_databases}
             for database_name in await _visible_database_names(datasette, actor)
         ]
+        stored_queries = await registry.get_stored_queries(app_id)
         csp_origins = "\n".join(await registry.get_csp_origins(app_id))
         return Response.html(
             await datasette.render_template(
@@ -358,7 +390,12 @@ async def edit_app(datasette, request):
                     "revisions": revisions,
                     "access_mode": access_mode,
                     "sql_database_options": sql_database_options,
+                    "stored_query_options": await stored_query_options(
+                        datasette, stored_queries
+                    ),
+                    "query_search_url": datasette.urls.path("/-/queries.json"),
                     "csp_origins": csp_origins,
+                    "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
                     "codemirror_assets": _codemirror_assets(),
                 },
                 request=request,
@@ -373,6 +410,10 @@ async def edit_app(datasette, request):
         update_kwargs["is_private"] = access_mode == "private"
     if "sql_databases_present" in post:
         update_kwargs["sql_databases"] = await _selected_sql_databases(
+            datasette, actor, post
+        )
+    if "stored_queries_present" in post:
+        update_kwargs["stored_queries"] = await _selected_stored_queries(
             datasette, actor, post
         )
     if "csp_origins" in post:
@@ -469,14 +510,26 @@ async def app_query(datasette, request):
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     try:
         body = json.loads((await request.post_body()).decode("utf-8") or "{}")
-        result = await run_app_query(
-            datasette,
-            app,
-            actor,
-            body["database"],
-            body["sql"],
-            body.get("params"),
-        )
+        if "query" in body:
+            # Keep stored query execution server-side so permission revocations
+            # apply immediately to app pages that are already loaded in browsers.
+            result = await run_app_stored_query(
+                datasette,
+                app,
+                actor,
+                body["database"],
+                body["query"],
+                body.get("params"),
+            )
+        else:
+            result = await run_app_query(
+                datasette,
+                app,
+                actor,
+                body["database"],
+                body["sql"],
+                body.get("params"),
+            )
         return Response.json({"ok": True, "result": result})
     except (KeyError, json.JSONDecodeError) as e:
         return Response.json({"ok": False, "error": f"Invalid request: {e}"})
