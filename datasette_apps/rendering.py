@@ -208,12 +208,6 @@ def iframe_bridge_script():
       });
     },
     storedQuery: function(database, query, params) {
-      if (typeof query !== "string" && typeof database === "string" && database.indexOf("/") > -1) {
-        params = query || {};
-        var parts = database.split("/");
-        database = parts.shift();
-        query = parts.join("/");
-      }
       var id = nextId++;
       return new Promise(function(resolve, reject) {
         pending.set(id, {
@@ -229,7 +223,6 @@ def iframe_bridge_script():
       });
     }
   };
-  window.datasette.runStoredQuery = window.datasette.storedQuery;
 })();
 </script>"""
 

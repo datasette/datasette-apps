@@ -174,7 +174,6 @@
       "- If a database is not selected in the app's Data access settings, datasette.query() cannot query it.\n" +
       "- The returned value has this shape: {columns: [...], rows: [{...}, ...]}.\n" +
       "- await datasette.storedQuery(database, query, params?)\n" +
-      "- You can also call await datasette.storedQuery(\"database/query\", params?).\n" +
       "- Stored query access is limited to queries selected in this app's Stored query access settings and this actor's normal Datasette query permissions.\n" +
       "- Stored queries are selected on the create/edit page by searching the stored query picker. You must save the page after adding or removing queries before the app can use those changes.\n" +
       "- Use stored queries when the app should call existing saved logic, especially writable queries or queries with carefully designed permissions.\n" +
@@ -206,7 +205,7 @@
       "  async function main() {\n" +
       "    const result = await datasette.query(\"main\", \"select * from example_table limit 10\");\n" +
       "    // For an allow-listed stored query, use:\n" +
-      "    // const result = await datasette.storedQuery(\"main/example_query\", {id: 1});\n" +
+      "    // const result = await datasette.storedQuery(\"main\", \"example_query\", {id: 1});\n" +
       "    document.getElementById(\"output\").textContent =\n" +
       "      JSON.stringify(result.rows, null, 2);\n" +
       "  }\n" +

@@ -157,6 +157,17 @@
     return params;
   }
 
+  function splitStoredQueryKey(key) {
+    var slash = key.indexOf("/");
+    if (slash === -1) {
+      return {database: "", query: key};
+    }
+    return {
+      database: key.slice(0, slash),
+      query: key.slice(slash + 1)
+    };
+  }
+
   function indent(lines, spaces) {
     var prefix = " ".repeat(spaces);
     return lines.map(function(line) {
@@ -228,17 +239,19 @@
       var id = "stored-query-" + slug(query.key, index);
       var params = jsString(paramsObject(query.parameters || []));
       var variable = "storedQueryResult" + index;
+      var parts = splitStoredQueryKey(query.key);
+      var call = "datasette.storedQuery(" + jsString(parts.database) + ", " + jsString(parts.query) + ", " + params + ")";
       if (query.isWrite) {
         lines.push("document.getElementById(" + jsString(id + "-button") + ").addEventListener('click', async () => {");
         lines.push("  try {");
-        lines.push("    const " + variable + " = await datasette.storedQuery(" + jsString(query.key) + ", " + params + ");");
+        lines.push("    const " + variable + " = await " + call + ";");
         lines.push("    render(" + jsString(id) + ", " + variable + ");");
         lines.push("  } catch (error) {");
         lines.push("    render(" + jsString(id) + ", error.message || String(error));");
         lines.push("  }");
         lines.push("});");
       } else {
-        lines.push("const " + variable + " = await datasette.storedQuery(" + jsString(query.key) + ", " + params + ");");
+        lines.push("const " + variable + " = await " + call + ";");
         lines.push("render(" + jsString(id) + ", " + variable + ".rows || " + variable + ");");
       }
     });

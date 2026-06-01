@@ -73,9 +73,12 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     assert "function stopAutoUpdate()" in response.text
     assert "body { font-family: Helvetica }" in response.text
     assert "select name, type from sqlite_master" in response.text
+    assert "function splitStoredQueryKey(key)" in response.text
+    assert "jsString(parts.database)" in response.text
+    assert "jsString(parts.query)" in response.text
     assert "datasette.query(database, sql, params?)" in response.text
     assert "datasette.storedQuery(database, query, params?)" in response.text
-    assert 'datasette.storedQuery(\\"database/query\\", params?)' in response.text
+    assert 'datasette.storedQuery(\\"database/query\\", params?)' not in response.text
     assert "Stored queries are selected on the create/edit page" in response.text
     assert "databases enabled for this app" in response.text
     assert "Content Security Policy" in response.text

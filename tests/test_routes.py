@@ -61,6 +61,8 @@ async def test_create_view_and_edit_stored_app():
     assert "datasette-app-query" in view.text
     assert "datasette-app-stored-query" in view.text
     assert "storedQuery" in view.text
+    assert "database.indexOf" not in view.text
+    assert "runStoredQuery" not in view.text
     assert f"/-/apps/{app_id}/query" in view.text
     assert "window.datasette" in view.text
     assert "datasette.request" not in view.text
