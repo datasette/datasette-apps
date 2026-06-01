@@ -15,7 +15,7 @@ datasette install datasette-apps
 ```
 ## Usage
 
-This plugin introduces a new interface at `/-/apps` for searching browsing available apps.
+This plugin introduces a new interface at `/-/apps` for browsing and searching available apps.
 
 There are two types of app:
 
@@ -33,15 +33,29 @@ Signed-in users get an "Apps" link in Datasette's top-right menu.
 
 HTML apps managed by this plugin use lowercase monotonic ULIDs as their IDs and track every edit as a new row in `app_revisions`.
 
-Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`: direct network access is blocked unless the app has exact `https://` origins configured, those same origins are allowed for remote images, external script tags, and external stylesheet links/style elements, and localhost origins are never allowed. Local file previews using `data:` and `blob:` image URLs are allowed.
+### Sandboxed apps
+
+Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content Security Policy into the iframe `srcdoc`.
+
+Direct network access is blocked unless the app has exact `https://` origins configured. Those same origins are allowed for remote images, external script tags, and external stylesheet links/style elements. Localhost origins are never allowed. Local file previews using `data:` and `blob:` image URLs are allowed.
 
 The iframe bridge reports JavaScript errors, unhandled promise rejections, CSP violations, failed resources, fetch failures, `console.error()` calls, and failed Datasette data queries back to the parent page. The app page shows these in a small expandable error panel above the iframe.
 
 The bridge also replaces `history.replaceState()`, `history.pushState()`, `history.back()`, `history.forward()`, and `history.go()` with no-op functions inside the sandboxed iframe, avoiding browser errors from apps that try to manage URL state.
 
-Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper. They can also run allow-listed stored queries using `datasette.storedQuery(database, query, params)` or `datasette.storedQuery("database/query", params)`. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped query endpoint. Apps have allow-lists configured on the edit page; if the requested database or stored query is allowed, the request is forwarded to Datasette's own JSON APIs using the current actor, so Datasette's normal SQL and query permissions still apply. Failed stored-query attempts, including attempts to call a query that is not allow-listed or that the current actor cannot run, are reported in the app page error panel.
+### Data access
+
+Stored apps can query Datasette data using the injected `datasette.query(database, sql, params)` helper.
+
+They can also run allow-listed stored queries using `datasette.storedQuery(database, query, params)`. The iframe sends those requests to the parent page with `postMessage`, and the parent page forwards them to an app-scoped query endpoint.
+
+Apps have allow-lists configured on the edit page. If the requested database or stored query is allowed, the request is forwarded to Datasette's own JSON APIs using the current actor, so Datasette's normal SQL and query permissions still apply.
+
+Failed stored-query attempts, including attempts to call a query that is not allow-listed or that the current actor cannot run, are reported in the app page error panel.
 
 Stored query access is configured using a picker on the create and edit pages. The picker searches Datasette's `/-/queries.json?q=search-term` API and stores selected queries as `database-name/query-name` strings. Removing a query uses the `x` button next to that selected query. Additions and removals are not applied until the page is saved.
+
+### Permissions
 
 The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can always view, edit, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
 
@@ -58,6 +72,8 @@ External apps registered by plugins are not private by default, so they also req
 Signed-in users can pin apps from the catalog and from individual stored app pages. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
 
 The `/-/apps` catalog is searchable and paginated, using a `next` cursor in the URL for subsequent pages.
+
+### App authoring
 
 The create and edit pages include a copyable prompt for an LLM. The prompt is assembled in the browser from the current form state, so unsaved changes to selected databases, stored queries, and network origins are reflected immediately. It explains the sandbox, the `datasette.query()` and `datasette.storedQuery()` bridges, CSP restrictions, the current schema summary, and only the stored queries selected for that app.
 
