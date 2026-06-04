@@ -92,6 +92,36 @@ def iframe_bridge_script():
     }
   }
 
+  function postBlockedNavigation(url, source) {
+    postAppError("blocked-frame-navigation", {
+      message: url ? "Blocked frame navigation to " + url : "Blocked frame navigation",
+      blockedURI: url || "",
+      navigationSource: source || ""
+    });
+  }
+
+  function externalHttpUrl(href) {
+    try {
+      var url = new URL(href, document.baseURI);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return "";
+      }
+      return url.href;
+    } catch (ignore) {
+      return "";
+    }
+  }
+
+  function closestAnchor(target) {
+    while (target && target !== document) {
+      if (target.tagName && target.tagName.toLowerCase() === "a") {
+        return target;
+      }
+      target = target.parentNode;
+    }
+    return null;
+  }
+
   window.addEventListener("error", function(event) {
     if (event.target && event.target !== window && event.target !== document) {
       var target = event.target;
@@ -133,6 +163,26 @@ def iframe_bridge_script():
       colno: event.columnNumber || 0
     });
   });
+
+  window.addEventListener("click", function(event) {
+    if (event.defaultPrevented || event.button !== 0) {
+      return;
+    }
+    var anchor = closestAnchor(event.target);
+    if (!anchor) {
+      return;
+    }
+    var rawHref = (anchor.getAttribute("href") || "").trim();
+    if (!rawHref || rawHref.charAt(0) === "#") {
+      return;
+    }
+    var url = externalHttpUrl(rawHref);
+    if (!url) {
+      return;
+    }
+    event.preventDefault();
+    postBlockedNavigation(url, "link-click");
+  }, true);
 
   if (window.console && typeof window.console.error === "function") {
     var originalConsoleError = window.console.error;
@@ -286,6 +336,9 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
     if (error.status) {
       parts.push("Status: " + error.status + (error.statusText ? " " + error.statusText : ""));
     }
+    if (error.navigationSource) {
+      parts.push("Navigation source: " + error.navigationSource);
+    }
     if (error.blockedURI) {
       parts.push("Blocked URI: " + error.blockedURI);
     }
@@ -326,6 +379,27 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
     errors = errors.slice(-50);
     renderErrors();
   }
+
+  window.addEventListener("securitypolicyviolation", function(event) {
+    var directive = event.effectiveDirective || event.violatedDirective || "";
+    if (directive !== "frame-src") {
+      return;
+    }
+    addAppError({
+      kind: "blocked-frame-navigation",
+      message: event.blockedURI
+        ? "Blocked frame navigation to " + event.blockedURI
+        : "Blocked frame navigation",
+      timestamp: new Date().toISOString(),
+      blockedURI: event.blockedURI || "",
+      violatedDirective: event.violatedDirective || "",
+      effectiveDirective: event.effectiveDirective || "",
+      originalPolicy: event.originalPolicy || "",
+      sourceFile: event.sourceFile || "",
+      lineno: event.lineNumber || 0,
+      colno: event.columnNumber || 0
+    });
+  }, true);
 
   window.addEventListener("message", async function(event) {
     if (!iframe || event.source !== iframe.contentWindow) {

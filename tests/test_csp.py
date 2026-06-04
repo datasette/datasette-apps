@@ -97,6 +97,8 @@ def test_iframe_bridge_reports_app_errors_to_parent():
 
     assert 'type: "datasette-app-error"' in script
     assert "securitypolicyviolation" in script
+    assert "blocked-frame-navigation" in script
+    assert "link-click" in script
     assert "unhandledrejection" in script
     assert "console.error" in script
     assert "window.fetch" in script
@@ -118,3 +120,6 @@ def test_parent_bridge_renders_app_error_panel():
     assert "datasette-app-error-list" in script
     assert 'message.type === "datasette-app-error"' in script
     assert "errors.slice(-50)" in script
+    assert "securitypolicyviolation" in script
+    assert 'directive !== "frame-src"' in script
+    assert "blocked-frame-navigation" in script
