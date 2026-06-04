@@ -1,6 +1,6 @@
 import pytest
 
-from datasette_apps.csp import build_csp, normalize_connect_origin
+from datasette_apps.csp import APP_VIEW_PARENT_CSP, build_csp, normalize_connect_origin
 from datasette_apps.rendering import (
     build_app_srcdoc,
     iframe_bridge_script,
@@ -13,6 +13,10 @@ def test_build_csp_defaults_to_no_connect_src():
         "default-src 'none'; script-src 'unsafe-inline'; "
         "style-src 'unsafe-inline'; img-src data: blob:;"
     )
+
+
+def test_app_view_parent_csp_blocks_frame_navigation():
+    assert APP_VIEW_PARENT_CSP == "frame-src 'none';"
 
 
 def test_build_csp_includes_exact_connect_origins():

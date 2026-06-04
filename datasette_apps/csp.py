@@ -9,6 +9,8 @@ BASE_DIRECTIVES = [
     "style-src 'unsafe-inline'",
 ]
 
+APP_VIEW_PARENT_CSP = "frame-src 'none';"
+
 
 def _is_localhost(hostname):
     if not hostname:

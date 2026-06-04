@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from datasette import Forbidden, NotFound, Response
 from datasette.resources import DatabaseResource, QueryResource
 
-from .csp import build_csp
+from .csp import APP_VIEW_PARENT_CSP, build_csp
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
 from .permissions import AppResource, AppsResource
 from .prompt import build_llm_prompt_data, stored_query_options
@@ -351,7 +351,8 @@ async def view_app(datasette, request):
                 "can_pin": bool(actor),
             },
             request=request,
-        )
+        ),
+        headers={"Content-Security-Policy": APP_VIEW_PARENT_CSP},
     )
 
 

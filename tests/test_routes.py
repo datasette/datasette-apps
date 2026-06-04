@@ -55,6 +55,7 @@ async def test_create_view_and_edit_stored_app():
 
     view = await datasette.client.get(location, actor={"id": "alice"})
     assert view.status_code == 200
+    assert view.headers["content-security-policy"] == "frame-src 'none';"
     assert "Hello app" in view.text
     assert "iframe" in view.text
     assert 'sandbox="allow-scripts allow-forms"' in view.text
