@@ -378,25 +378,8 @@ def _json_script_string(value):
 def build_app_srcdoc(source, csp, bridge_script=""):
     source = source or ""
     security_head = _csp_meta(csp) + (bridge_script or "")
-    head_match = re.search(r"<head\b[^>]*>", source, flags=re.IGNORECASE)
-    if head_match:
-        return source[: head_match.end()] + security_head + source[head_match.end() :]
-
-    html_match = re.search(r"<html\b[^>]*>", source, flags=re.IGNORECASE)
-    if html_match:
-        return (
-            source[: html_match.end()]
-            + f"<head>{security_head}</head>"
-            + source[html_match.end() :]
-        )
-
     doctype_match = re.match(r"\s*<!doctype html\s*>", source, flags=re.IGNORECASE)
     if doctype_match:
-        return (
-            source[: doctype_match.end()]
-            + f"<html><head>{security_head}</head><body>"
-            + source[doctype_match.end() :]
-            + "</body></html>"
-        )
+        return source[: doctype_match.end()] + security_head + source[doctype_match.end() :]
 
-    return f"<html><head>{security_head}</head><body>{source}</body></html>"
+    return security_head + source
