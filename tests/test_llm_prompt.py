@@ -9,6 +9,7 @@ def create_database(tmp_path):
     db_path = tmp_path / "content.db"
     conn = sqlite3.connect(db_path)
     conn.executescript("""
+        create table _drafts (id integer primary key, body text);
         create table authors (id integer primary key, name text);
         create table news (
             id integer primary key,
@@ -48,9 +49,23 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     assert "cm-editor-6.0.1.bundle.js" in response.text
     assert 'textarea id="html-editor"' in response.text
     assert "cm.editorFromTextArea" in response.text
+    assert "max-height: calc(50lh + 2px)" in response.text
+    assert ".cm-editor .cm-scroller" in response.text
+    assert "Use AI to build this app" in response.text
     assert "Copy prompt" in response.text
+    assert 'copyButton.textContent = "Copied"' in response.text
+    assert "}, 1500);" in response.text
+    assert (
+        "Describe the app you want in an LLM chat, then copy this prompt in as context"
+        in response.text
+    )
+    assert "<summary>Show full prompt</summary>" in response.text
     assert 'id="llm-prompt" rows="24" cols="100" readonly></textarea>' in response.text
     assert 'id="llm-prompt-data"' in response.text
+    assert response.text.index('id="copy-llm-prompt"') < response.text.index(
+        "<details>"
+    )
+    assert response.text.index("<details>") < response.text.index('id="llm-prompt"')
     assert "htmlInput.datasetteAppsEditorView = cm.editorFromTextArea" in response.text
     assert "datasette-app-editor-ready" in response.text
     assert "function buildPrompt()" in response.text
@@ -94,6 +109,7 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     assert "history.pushState()" in response.text
     assert '"schema_by_database": {"content": "Database: content' in response.text
     assert "table: news" in response.text
+    assert response.text.index("table: news") < response.text.index("table: _drafts")
     assert "title TEXT" in response.text
     assert "author_id -\\u003e authors.id" in response.text
     assert "Currently selected stored queries" in response.text
@@ -132,6 +148,7 @@ async def test_edit_page_prompt_has_selected_stored_query_metadata(tmp_path):
     assert 'data-query-description="Find an author by ID"' in response.text
     assert "data-query-parameters='[\"id\"]'" in response.text
     assert 'data-query-is-write="0"' in response.text
+    assert "Use AI to edit this app" in response.text
     assert 'id="llm-prompt-data"' in response.text
     assert "function buildPrompt()" in response.text
     assert "&lt;pre&gt;```stored```&lt;/pre&gt;" in response.text

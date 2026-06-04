@@ -1,7 +1,25 @@
+import sqlite3
+
 import pytest
 from datasette.app import Datasette
 
 from datasette_apps import Registry
+
+
+def create_table_preview_database(tmp_path):
+    db_path = tmp_path / "table_preview.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        create table _audit (id integer primary key);
+        create table alpha (id integer primary key);
+        create table beta (id integer primary key);
+        create table charlie (id integer primary key);
+        create table delta (id integer primary key);
+        create table echo (id integer primary key);
+        create table foxtrot (id integer primary key);
+    """)
+    conn.close()
+    return db_path
 
 
 @pytest.mark.asyncio
@@ -15,32 +33,43 @@ async def test_create_form_shows_access_data_and_network_controls():
     assert 'class="datasette-app-edit-layout"' in response.text
     assert 'class="datasette-app-edit-sidebar"' in response.text
     assert 'textarea id="app-description" name="description"' in response.text
-    assert "App access" in response.text
+    assert "Visibility" in response.text
     assert "Private (only me)" in response.text
+    assert (
+        "If Private is unchecked, this app will be visible to other users of this site."
+        in response.text
+    )
     assert 'type="checkbox" name="is_private" value="1" checked' in response.text
     assert 'name="access_mode"' not in response.text
     assert "Specific users" not in response.text
     assert "Specific actor IDs" not in response.text
     assert 'name="actor_ids"' not in response.text
-    assert "Read-only data access" in response.text
+    assert "Data access" in response.text
     assert "Read-only SQL query databases" in response.text
+    assert (
+        "The app will only be able to access data from the selected databases."
+        in response.text
+    )
     assert 'name="sql_databases"' in response.text
     assert 'value="_memory"' in response.text
-    assert "Stored query access" in response.text
+    assert "Query access" in response.text
     assert 'data-query-search-url="/-/queries.json"' in response.text
     assert 'name="stored_queries_present"' in response.text
-    assert "Changes take effect after you save this page" in response.text
+    assert "Pick stored queries this app can run." in response.text
+    assert "Changes take effect after you save this page" not in response.text
     assert "Network access" in response.text
+    assert (
+        "any site listed here could receive private data from this app" in response.text
+    )
     assert "Enter exact https:// origins" in response.text
-    assert "external scripts" in response.text
+    assert 'placeholder="https://cdn.jsdelivr.net"' in response.text
+    assert "images, scripts, and styles" in response.text
     assert 'name="csp_origins"' in response.text
     assert response.text.index(
         'class="datasette-app-edit-sidebar"'
-    ) < response.text.index("App access")
-    assert response.text.index("App access") < response.text.index(
-        "Read-only data access"
-    )
-    assert response.text.index("Read-only data access") < response.text.index(
+    ) < response.text.index("Visibility")
+    assert response.text.index("Visibility") < response.text.index("Data access")
+    assert response.text.index("Data access") < response.text.index(
         ">Create app</button>"
     )
 
@@ -98,36 +127,60 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'class="datasette-app-edit-layout"' in response.text
     assert 'class="datasette-app-edit-sidebar"' in response.text
     assert 'textarea id="app-description" name="description"' in response.text
-    assert "App access" in response.text
+    assert "Visibility" in response.text
     assert "Private (only me)" in response.text
+    assert (
+        "If Private is unchecked, this app will be visible to other users of this site."
+        in response.text
+    )
     assert 'type="checkbox" name="is_private" value="1" checked' in response.text
     assert 'name="access_mode"' not in response.text
     assert "Specific users" not in response.text
     assert "Specific actor IDs" not in response.text
     assert 'name="actor_ids"' not in response.text
-    assert "Read-only data access" in response.text
+    assert "Data access" in response.text
     assert "Read-only SQL query databases" in response.text
+    assert (
+        "The app will only be able to access data from the selected databases."
+        in response.text
+    )
     assert 'name="sql_databases"' in response.text
     assert 'value="_memory"' in response.text
-    assert "Stored query access" in response.text
+    assert "Query access" in response.text
     assert 'data-query-search-url="/-/queries.json"' in response.text
     assert 'name="stored_queries_present"' in response.text
-    assert "Changes take effect after you save this page" in response.text
+    assert "Pick stored queries this app can run." in response.text
+    assert "Changes take effect after you save this page" not in response.text
     assert "Network access" in response.text
+    assert (
+        "any site listed here could receive private data from this app" in response.text
+    )
     assert "Enter exact https:// origins" in response.text
-    assert "external scripts" in response.text
+    assert 'placeholder="https://cdn.jsdelivr.net"' in response.text
+    assert "images, scripts, and styles" in response.text
     assert "Capabilities" not in response.text
     assert "Capability grants JSON" not in response.text
     assert 'name="capability_grants"' not in response.text
     assert response.text.index(
         'class="datasette-app-edit-sidebar"'
-    ) < response.text.index("App access")
-    assert response.text.index("App access") < response.text.index(
-        "Read-only data access"
+    ) < response.text.index("Visibility")
+    assert response.text.index("Visibility") < response.text.index("Data access")
+    assert response.text.index("Data access") < response.text.index("Save app")
+
+
+@pytest.mark.asyncio
+async def test_create_form_shows_database_link_and_table_preview(tmp_path):
+    datasette = Datasette([str(create_table_preview_database(tmp_path))])
+
+    response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
+
+    assert response.status_code == 200
+    assert (
+        '<a href="/table_preview"><strong>table_preview</strong></a>' in response.text
     )
-    assert response.text.index("Read-only data access") < response.text.index(
-        "Save app"
-    )
+    assert "alpha, beta, charlie, delta, echo, ..." in response.text
+    assert "table_preview, _audit" not in response.text
+    assert "alpha, beta, charlie, delta, echo, foxtrot" not in response.text
 
 
 @pytest.mark.asyncio

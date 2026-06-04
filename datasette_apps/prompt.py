@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datasette.resources import TableResource
 
+from .utils import sort_names_with_underscores_last
+
 
 def _quote_identifier(identifier):
     return '"' + identifier.replace('"', '""') + '"'
@@ -22,7 +24,7 @@ async def _schema_by_database(datasette, actor):
             continue
         lines = []
         for resource_type, names in (
-            ("table", await db.table_names()),
+            ("table", sort_names_with_underscores_last(await db.table_names())),
             ("view", await db.view_names()),
         ):
             for resource_name in names:

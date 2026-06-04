@@ -199,7 +199,7 @@ async def test_revision_pages_show_non_html_changes_without_empty_diff():
     await assert_settings_revision(
         3,
         [
-            "Read-only data access",
+            "Data access",
             'datasette-app-revision-empty-value">- unset -</span>',
             "_memory",
         ],

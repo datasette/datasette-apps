@@ -1,10 +1,16 @@
-{% macro prompt(llm_prompt_data) %}
+{% macro prompt(llm_prompt_data, heading="Use AI to build this app") %}
 <section class="datasette-app-llm-prompt">
-  <h2>LLM prompt</h2>
+  <h2>{{ heading }}</h2>
+  <p class="datasette-app-form-help">
+    Describe the app you want in an LLM chat, then copy this prompt in as context so it can generate or revise the app HTML. Paste the result into the HTML editor above.
+  </p>
   <div class="datasette-app-form-actions">
     <button type="button" id="copy-llm-prompt">Copy prompt</button>
   </div>
-  <textarea id="llm-prompt" rows="24" cols="100" readonly></textarea>
+  <details>
+    <summary>Show full prompt</summary>
+    <textarea id="llm-prompt" rows="24" cols="100" readonly></textarea>
+  </details>
   <script type="application/json" id="llm-prompt-data">{{ llm_prompt_data|tojson }}</script>
 </section>
 
@@ -174,7 +180,7 @@
       "- If a database is not selected in the app's Data access settings, datasette.query() cannot query it.\n" +
       "- The returned value has this shape: {columns: [...], rows: [{...}, ...]}.\n" +
       "- await datasette.storedQuery(database, query, params?)\n" +
-      "- Stored query access is limited to queries selected in this app's Stored query access settings and this actor's normal Datasette query permissions.\n" +
+      "- Stored query access is limited to queries selected in this app's Query access settings and this actor's normal Datasette query permissions.\n" +
       "- Stored queries are selected on the create/edit page by searching the stored query picker. You must save the page after adding or removing queries before the app can use those changes.\n" +
       "- Use stored queries when the app should call existing saved logic, especially writable queries or queries with carefully designed permissions.\n" +
       "- Read-only stored queries return {columns: [...], rows: [{...}, ...]}. Writable stored queries return Datasette's JSON execution response.\n\n" +
@@ -218,9 +224,25 @@
   }
 
   if (copyButton) {
+    var copyButtonText = copyButton.textContent;
+    var copyButtonReset = null;
+    function showCopied() {
+      copyButton.textContent = "Copied";
+      if (copyButtonReset) {
+        window.clearTimeout(copyButtonReset);
+      }
+      copyButtonReset = window.setTimeout(function() {
+        copyButton.textContent = copyButtonText;
+        copyButtonReset = null;
+      }, 1500);
+    }
     copyButton.addEventListener("click", async function() {
       buildPrompt();
-      await navigator.clipboard.writeText(promptInput.value);
+      try {
+        await navigator.clipboard.writeText(promptInput.value);
+      } catch (ignore) {
+      }
+      showCopied();
     });
   }
 

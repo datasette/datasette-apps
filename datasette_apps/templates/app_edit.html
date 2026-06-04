@@ -67,37 +67,45 @@
     </div>
 
     <aside class="datasette-app-edit-sidebar">
-      <h2>App access</h2>
+      <h2>Visibility</h2>
       <div class="datasette-app-form-row">
         <input type="hidden" name="is_private" value="0">
         <label>
           <input type="checkbox" name="is_private" value="1"{% if access_mode != "not-private" %} checked{% endif %}>
           Private (only me)
         </label>
+        <p class="datasette-app-form-help">
+          If Private is unchecked, this app will be visible to other users of this site.
+        </p>
       </div>
 
-      <h2>Read-only data access</h2>
+      <h2>Data access</h2>
       <div class="datasette-app-form-row">
         <fieldset class="datasette-app-checkbox-group">
           <legend>Read-only SQL query databases</legend>
           <input type="hidden" name="sql_databases_present" value="1">
           {% for database in sql_database_options %}
-            <label>
+            <label class="datasette-app-database-option">
               <input
                 type="checkbox"
                 name="sql_databases"
                 value="{{ database.name }}"
                 {% if database.selected %}checked{% endif %}
               >
-              {{ database.name }}
+              <span class="datasette-app-database-option-text">
+                <a href="{{ database.href }}"><strong>{{ database.name }}</strong></a>{% if database.table_preview %}<span class="datasette-app-database-tables">, {{ database.table_preview|join(", ") }}{% if database.has_more_tables %}, ...{% endif %}</span>{% endif %}
+              </span>
             </label>
           {% else %}
             <p>No databases are visible to you.</p>
           {% endfor %}
         </fieldset>
+        <p class="datasette-app-form-help">
+          The app will only be able to access data from the selected databases.
+        </p>
       </div>
 
-      <h2>Stored query access</h2>
+      <h2>Query access</h2>
       <div class="datasette-app-form-row">
         {{ stored_query_picker.picker(stored_query_options, query_search_url) }}
       </div>
@@ -105,10 +113,13 @@
       <h2>Network access</h2>
       <div class="datasette-app-form-row">
         <label for="app-csp-origins">Allowed network and asset origins</label>
-        <p class="datasette-app-form-help">
-          Enter exact https:// origins, one per line, such as https://api.github.com. These origins can be used for fetch(), remote images, external scripts, and external styles. Do not include paths, query strings, wildcards, or localhost.
+        <p class="datasette-app-form-warning">
+          Be cautious: any site listed here could receive private data from this app.
         </p>
-        <textarea id="app-csp-origins" name="csp_origins" rows="4">{{ csp_origins }}</textarea>
+        <textarea id="app-csp-origins" name="csp_origins" rows="4" placeholder="https://cdn.jsdelivr.net">{{ csp_origins }}</textarea>
+        <p class="datasette-app-form-help">
+          Enter exact https:// origins, one per line. Do not include paths, query strings, wildcards, or localhost. These origins can be used for fetch(), images, scripts, and styles.
+        </p>
       </div>
 
       <div class="datasette-app-form-actions">
@@ -118,7 +129,7 @@
   </div>
 </form>
 
-{{ llm_prompt.prompt(llm_prompt_data) }}
+{{ llm_prompt.prompt(llm_prompt_data, "Use AI to edit this app") }}
 
 <section class="datasette-app-revisions">
   <h2>Revision history</h2>

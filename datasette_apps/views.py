@@ -6,7 +6,7 @@ import json
 from urllib.parse import urlencode
 
 from datasette import Forbidden, NotFound, Response
-from datasette.resources import DatabaseResource, QueryResource
+from datasette.resources import DatabaseResource, QueryResource, TableResource
 
 from .csp import APP_VIEW_PARENT_CSP, build_csp
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
@@ -14,6 +14,7 @@ from .permissions import AppResource, AppsResource
 from .prompt import build_llm_prompt_data, stored_query_options
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
 from .registry import Registry
+from .utils import sort_names_with_underscores_last
 
 
 def _require_actor(request):
@@ -42,7 +43,12 @@ def _codemirror_assets():
     overflow: hidden;
     width: min(100%, 1000px);
     min-height: 28rem;
+    max-height: calc(50lh + 2px);
     border: 1px solid #ddd;
+  }
+  .cm-editor .cm-scroller {
+    max-height: 50lh;
+    overflow: auto;
   }
   .cm-editor.cm-readonly .cm-content {
     cursor: default;
@@ -96,6 +102,38 @@ async def _visible_database_names(datasette, actor):
     return names
 
 
+async def _visible_table_preview(datasette, actor, database_name):
+    db = datasette.databases[database_name]
+    table_names = []
+    for table_name in sort_names_with_underscores_last(await db.table_names()):
+        if await datasette.allowed(
+            action="view-table",
+            resource=TableResource(database_name, table_name),
+            actor=actor,
+        ):
+            table_names.append(table_name)
+            if len(table_names) > 5:
+                break
+    return {
+        "table_preview": table_names[:5],
+        "has_more_tables": len(table_names) > 5,
+    }
+
+
+async def _visible_database_options(datasette, actor, selected=()):
+    selected = set(selected)
+    options = []
+    for database_name in await _visible_database_names(datasette, actor):
+        option = {
+            "name": database_name,
+            "href": datasette.urls.database(database_name),
+            "selected": database_name in selected,
+        }
+        option.update(await _visible_table_preview(datasette, actor, database_name))
+        options.append(option)
+    return options
+
+
 def _csp_origins_from_post(post):
     return [
         origin.strip()
@@ -138,8 +176,8 @@ _REVISION_FIELD_LABELS = {
     "description": "Description",
     "html": "HTML",
     "is_private": "Privacy",
-    "sql_databases": "Read-only data access",
-    "stored_queries": "Stored query access",
+    "sql_databases": "Data access",
+    "stored_queries": "Query access",
     "csp_origins": "Network access",
 }
 
@@ -274,16 +312,14 @@ async def create_app(datasette, request):
     ):
         raise Forbidden("Permission denied: create-app")
     if request.method == "GET":
-        sql_database_options = [
-            {"name": database_name, "selected": False}
-            for database_name in await _visible_database_names(datasette, actor)
-        ]
         return Response.html(
             await datasette.render_template(
                 "app_create.html",
                 {
                     "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
-                    "sql_database_options": sql_database_options,
+                    "sql_database_options": await _visible_database_options(
+                        datasette, actor
+                    ),
                     "stored_query_options": [],
                     "query_search_url": datasette.urls.path("/-/queries.json"),
                     "codemirror_assets": _codemirror_assets(),
@@ -376,10 +412,6 @@ async def edit_app(datasette, request):
             revisions.append(revision)
         access_mode = await registry.get_access_mode(app_id)
         sql_databases = set(await registry.get_sql_databases(app_id))
-        sql_database_options = [
-            {"name": database_name, "selected": database_name in sql_databases}
-            for database_name in await _visible_database_names(datasette, actor)
-        ]
         stored_queries = await registry.get_stored_queries(app_id)
         csp_origins = "\n".join(await registry.get_csp_origins(app_id))
         return Response.html(
@@ -390,7 +422,9 @@ async def edit_app(datasette, request):
                     "html_source": version["html"],
                     "revisions": revisions,
                     "access_mode": access_mode,
-                    "sql_database_options": sql_database_options,
+                    "sql_database_options": await _visible_database_options(
+                        datasette, actor, sql_databases
+                    ),
                     "stored_query_options": await stored_query_options(
                         datasette, stored_queries
                     ),

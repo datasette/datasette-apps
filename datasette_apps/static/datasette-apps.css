@@ -137,8 +137,6 @@
   border: 1px solid #ddd;
   border-radius: 6px;
   padding: 1rem;
-  position: sticky;
-  top: 1rem;
 }
 
 .datasette-app-form h2 {
@@ -170,6 +168,15 @@
   margin: -0.1rem 0 0.45rem;
 }
 
+.datasette-app-form-warning {
+  background: #fff8e1;
+  border-left: 4px solid #c27d00;
+  color: #3f320d;
+  font-size: 0.9rem;
+  margin: 0 0 0.65rem;
+  padding: 0.5rem 0.65rem;
+}
+
 .datasette-app-checkbox-group {
   border: 1px solid #ddd;
   border-radius: 4px;
@@ -192,6 +199,24 @@
 
 .datasette-app-checkbox-group input[type="checkbox"] {
   margin: 0;
+}
+
+.datasette-app-checkbox-group .datasette-app-database-option {
+  align-items: flex-start;
+}
+
+.datasette-app-database-option input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+}
+
+.datasette-app-database-option-text {
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.datasette-app-database-tables {
+  color: rgba(17, 26, 53, 0.72);
 }
 
 .datasette-app-form input[type="text"],
@@ -273,6 +298,10 @@
   overflow: auto;
 }
 
+.datasette-app-stored-query-results[hidden] {
+  display: none;
+}
+
 .datasette-app-stored-query-results p {
   color: rgba(17, 26, 53, 0.72);
   margin: 0;
@@ -346,10 +375,20 @@
   max-width: 980px;
 }
 
+.datasette-app-llm-prompt details {
+  margin-top: 0.75rem;
+}
+
+.datasette-app-llm-prompt summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .datasette-app-llm-prompt textarea {
   border: 1px solid #bbb;
   border-radius: 4px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  margin-top: 1rem;
   padding: 0.65rem;
 }
 
@@ -666,7 +705,6 @@
 
   .datasette-app-edit-sidebar {
     margin-top: 1.25rem;
-    position: static;
   }
 
   .datasette-app-actions,
