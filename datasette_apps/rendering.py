@@ -281,7 +281,10 @@ def iframe_bridge_script():
   };
 
   try {
-    // Keep the injected bridge out of the app's DOM after it has initialized.
+    // Cosmetic only: drop this <script> node now that the IIFE has run so the
+    // app's own DOM stays tidy. This is NOT an isolation boundary -- the click,
+    // message, error and fetch listeners plus the window.datasette API live on
+    // in closures and stay fully reachable by the app after the node is removed.
     var bridgeScript = document.getElementById("datasette-apps-bridge");
     if (bridgeScript && bridgeScript.parentNode) {
       bridgeScript.parentNode.removeChild(bridgeScript);
