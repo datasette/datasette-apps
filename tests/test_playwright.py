@@ -514,6 +514,53 @@ console.error("Playwright saw this app error");
         )
 
 
+def test_iframe_link_click_shows_parent_confirmation_modal(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<a id="external-link" href="https://example.com/docs?from=app#section">
+  Open docs
+</a>
+<p id="location">still here</p>""",
+            name="External link app",
+        )
+    )
+
+    with server, _browser_page() as page:
+        page.context.route(
+            "https://example.com/docs?from=app",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="text/html",
+                body="<title>External docs</title><h1>External docs</h1>",
+            ),
+        )
+        page.goto(server.app_url(app))
+        iframe = _iframe(page)
+        iframe.locator("#external-link").click()
+
+        modal = page.locator(".datasette-app-link-modal")
+        modal.wait_for(state="visible")
+        assert modal.locator("h2").inner_text() == "Open external link"
+        assert (
+            modal.locator(".datasette-app-link-url").inner_text()
+            == "https://example.com/docs?from=app#section"
+        )
+        assert iframe.locator("#location").inner_text() == "still here"
+
+        modal.locator("button", has_text="Cancel").click()
+        modal.wait_for(state="hidden")
+
+        iframe.locator("#external-link").click()
+        modal.wait_for(state="visible")
+        with page.expect_popup() as popup_info:
+            modal.locator("button", has_text="Open link").click()
+        popup = popup_info.value
+        popup.wait_for_load_state()
+        assert popup.url == "https://example.com/docs?from=app#section"
+
+
 def test_malicious_apps_cannot_exfiltrate_to_external_origin(tmp_path):
     content_db_path = tmp_path / "content.db"
     _create_secret_database(content_db_path)

@@ -161,7 +161,7 @@ CSP_BREAK_CASES = [
         id="D-uppercase-head",
     ),
     pytest.param(
-        "<Head\n  lang=\"en\"\n></Head>",
+        '<Head\n  lang="en"\n></Head>',
         id="D-multiline-head",
     ),
     pytest.param(
@@ -224,7 +224,7 @@ CSP_BREAK_CASES = [
     ),
     pytest.param(
         '<!DOCTYPE html PUBLIC "x">\n<script>var s="<head>";</script>\n'
-        "<img src=x onerror=steal()>\n<head title=\">\"></head>",
+        '<img src=x onerror=steal()>\n<head title=">"></head>',
         id="G-public-doctype-script-img-attribute-head",
     ),
     pytest.param(
