@@ -281,6 +281,7 @@ def iframe_bridge_script():
   };
 
   try {
+    // Keep the injected bridge out of the app's DOM after it has initialized.
     var bridgeScript = document.getElementById("datasette-apps-bridge");
     if (bridgeScript && bridgeScript.parentNode) {
       bridgeScript.parentNode.removeChild(bridgeScript);
