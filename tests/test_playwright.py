@@ -423,14 +423,15 @@ const status = document.getElementById("status");
   const SECRET = result.rows[0].secret;
   const LEAK_URL = LEAK_BASE + "/leak?secret=" + encodeURIComponent(SECRET);
   const WS_LEAK_URL = LEAK_URL.replace(/^http/, "ws");
-  status.textContent = "attempted";
-  setTimeout(function() {{
+  window.runAttempt = function() {{
+    status.textContent = "attempted";
     try {{
 {attempt_script}
     }} catch (error) {{
       status.textContent = "attempted with error";
     }}
-  }}, 100);
+  }};
+  status.textContent = "ready";
 }})();
 </script>
 </body>
@@ -577,7 +578,8 @@ def test_malicious_apps_cannot_exfiltrate_to_external_origin(tmp_path):
                 ), name
                 iframe = _iframe(page)
                 iframe.locator("#status").wait_for()
-                assert iframe.locator("#status").inner_text() == "attempted", name
+                assert iframe.locator("#status").inner_text() == "ready", name
+                iframe.evaluate("window.runAttempt()")
                 page.wait_for_timeout(300)
                 assert leak_server.requests == [], name
                 for open_page in page.context.pages:
@@ -608,7 +610,8 @@ def test_csp_allowlisted_origin_can_receive_exfiltrated_data(tmp_path, monkeypat
             assert response is not None
             iframe = _iframe(page)
             iframe.locator("#status").wait_for()
-            assert iframe.locator("#status").inner_text() == "attempted"
+            assert iframe.locator("#status").inner_text() == "ready"
+            iframe.evaluate("window.runAttempt()")
             leak_server.wait_for_request_count(1)
 
         assert leak_server.requests == [
