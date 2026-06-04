@@ -5,7 +5,7 @@
 [![Tests](https://github.com/datasette/datasette-apps/actions/workflows/test.yml/badge.svg)](https://github.com/datasette/datasette-apps/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/datasette/datasette-apps/blob/main/LICENSE)
 
-Apps that live inside Datasette
+Create apps that live inside Datasette
 
 ## Installation
 
@@ -19,7 +19,7 @@ This plugin introduces a new interface at `/-/apps` for browsing and searching a
 
 There are two types of app:
 
-- HTML and JavaScript apps that are managed by this plugin, which run in a sandbox to prevent them from damaging or stealing your data (if they are buggy or malicious)
+- HTML and JavaScript apps managed by this plugin, which run in a sandbox that limits them to approved Datasette data access and blocks communication with external sites unless those hosts have been explicitly allowed.
 - Apps provided by other plugins that are written in Python and HTML/JavaScript which are unrestricted but can do more things
 
 This plugin allows you to create and modify HTML apps, and provides a plugin hook to enable other plugins to add their own Python apps to the system.
@@ -73,7 +73,7 @@ External apps registered by plugins are not private by default, so they also req
 
 Signed-in users can pin apps from the catalog and from individual stored app pages. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
 
-The `/-/apps` catalog is searchable and paginated, using a `next` cursor in the URL for subsequent pages.
+The `/-/apps` catalog is searchable and paginated.
 
 ### App authoring
 

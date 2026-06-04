@@ -1,7 +1,7 @@
 [project]
 name = "datasette-apps"
-version = "0.1a0.dev1"
-description = "Apps that live inside Datasette"
+version = "0.1a0"
+description = "Create apps that live inside Datasette"
 readme = "README.md"
 authors = [{name = "Simon Willison"}]
 license = "Apache-2.0"
