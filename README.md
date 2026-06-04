@@ -57,7 +57,9 @@ Stored query access is configured using a picker on the create and edit pages. T
 
 ### Permissions
 
-The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, and `manage-app-access`. Stored app owners can always view, edit, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
+The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, `delete-app`, and `manage-app-access`. Stored app owners can always view, edit, delete, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
+
+Deleting a stored app hides it from the catalog and disables access to its pages and query API. Its `app_revisions` rows remain in the database so a database administrator can recover it if needed.
 
 Apps that are not private can be viewed by actors with the `view-app` permission. To let all signed-in users view all non-private apps, configure:
 

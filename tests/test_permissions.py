@@ -34,6 +34,38 @@ async def test_owner_can_view_and_edit_stored_app():
 
 
 @pytest.mark.asyncio
+async def test_owner_can_delete_stored_app_until_it_is_deleted():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Owned",
+        description="",
+        html="",
+    )
+    await datasette.invoke_startup()
+
+    assert await datasette.allowed(
+        action="delete-app",
+        resource=AppResource(app["id"]),
+        actor={"id": "alice"},
+    )
+    assert not await datasette.allowed(
+        action="delete-app",
+        resource=AppResource(app["id"]),
+        actor={"id": "bob"},
+    )
+
+    await registry.delete_stored_app(app["id"], actor_id="alice")
+
+    assert not await datasette.allowed(
+        action="delete-app",
+        resource=AppResource(app["id"]),
+        actor={"id": "alice"},
+    )
+
+
+@pytest.mark.asyncio
 async def test_actors_with_view_app_can_create_and_view_external_apps():
     datasette = Datasette(
         memory=True,

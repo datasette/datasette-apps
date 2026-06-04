@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Delete {{ app.name }}{% endblock %}
+
+{% block crumbs %}
+{% import "_app_crumbs.html" as app_crumbs with context %}
+{{ app_crumbs.nav(request=request, app=app) }}
+{% endblock %}
+
+{% block content %}
+<h1>Delete {{ app.name }}</h1>
+
+<p>
+  This will hide the app and disable access to its pages and query API.
+  Revision history remains in the database for administrator recovery.
+</p>
+
+<form method="post" class="datasette-app-delete-form">
+  <button type="submit" class="datasette-app-danger-button">Delete app</button>
+  <a class="datasette-app-button" href="{{ urls.path('/-/apps/' ~ app.id ~ '/edit') }}">Cancel</a>
+</form>
+{% endblock %}

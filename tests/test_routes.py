@@ -151,6 +151,99 @@ async def test_create_view_and_edit_stored_app():
 
 
 @pytest.mark.asyncio
+async def test_delete_stored_app_hides_routes_but_keeps_revisions():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Delete me",
+        description="Should be hidden",
+        html="<h1>Delete me</h1>",
+        sql_databases=["_memory"],
+    )
+    await registry.update_stored_app(
+        app["id"],
+        "Delete me",
+        "Updated before delete",
+        "<h1>Updated</h1>",
+        actor_id="alice",
+    )
+
+    edit_form = await datasette.client.get(
+        f"/-/apps/{app['id']}/edit", actor={"id": "alice"}
+    )
+    assert edit_form.status_code == 200
+    assert f'href="/-/apps/{app["id"]}/delete"' in edit_form.text
+
+    confirm = await datasette.client.get(
+        f"/-/apps/{app['id']}/delete", actor={"id": "alice"}
+    )
+    assert confirm.status_code == 200
+    assert "Delete Delete me" in confirm.text
+    assert "Revision history remains in the database" in confirm.text
+
+    deleted = await datasette.client.post(
+        f"/-/apps/{app['id']}/delete", actor={"id": "alice"}
+    )
+    assert deleted.status_code == 302
+    assert deleted.headers["location"] == "/-/apps"
+
+    index = await datasette.client.get("/-/apps", actor={"id": "alice"})
+    assert "Delete me" not in index.text
+
+    for path, method in [
+        (f"/-/apps/{app['id']}", "get"),
+        (f"/-/apps/{app['id']}.json", "get"),
+        (f"/-/apps/{app['id']}/edit", "get"),
+        (f"/-/apps/{app['id']}/delete", "get"),
+        (f"/-/apps/{app['id']}/revisions/1", "get"),
+    ]:
+        response = await getattr(datasette.client, method)(path, actor={"id": "alice"})
+        assert response.status_code == 404
+
+    query = await datasette.client.post(
+        f"/-/apps/{app['id']}/query",
+        actor={"id": "alice"},
+        json={"database": "_memory", "sql": "select 1"},
+    )
+    assert query.status_code == 404
+
+    rows = await datasette.get_internal_database().execute(
+        """
+        SELECT version, html
+        FROM app_revisions
+        WHERE app_id = ?
+        ORDER BY version
+        """,
+        [app["id"]],
+    )
+    assert [row["version"] for row in rows.rows] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_external_apps_cannot_be_soft_deleted_by_route():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"view-app": {"id": "*"}}},
+    )
+    registry = Registry(datasette)
+    await registry.add_app(
+        id="plugin:one",
+        name="Plugin One",
+        description="A plugin app",
+        path="/-/plugin-one",
+        source="plugin",
+    )
+
+    delete = await datasette.client.get(
+        "/-/apps/plugin:one/delete", actor={"id": "alice"}
+    )
+
+    assert delete.status_code == 404
+    assert (await registry.get_app("plugin:one")) is not None
+
+
+@pytest.mark.asyncio
 async def test_revision_pages_show_non_html_changes_without_empty_diff():
     datasette = Datasette(memory=True)
     registry = Registry(datasette)

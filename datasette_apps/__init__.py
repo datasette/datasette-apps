@@ -9,6 +9,7 @@ from .views import (
     app_revision,
     apps_index,
     create_app,
+    delete_app,
     edit_app,
     launch_app,
     pin_app,
@@ -28,6 +29,7 @@ def register_routes():
         (r"^/-/apps/(?P<id>[^/]+)\.json$", app_json),
         (r"^/-/apps/(?P<id>[^/]+)/revisions/(?P<version>\d+)$", app_revision),
         (r"^/-/apps/(?P<id>[^/]+)/edit$", edit_app),
+        (r"^/-/apps/(?P<id>[^/]+)/delete$", delete_app),
         (r"^/-/apps/(?P<id>[^/]+)/pin$", pin_app),
         (r"^/-/apps/(?P<id>[^/]+)/unpin$", unpin_app),
         (r"^/-/apps/(?P<id>[^/]+)/launch$", launch_app),
@@ -76,6 +78,7 @@ def jump_items_sql(datasette, actor, request):
             JOIN allowed_apps
                 ON allowed_apps.parent = 'apps'
                AND allowed_apps.child = apps.id
+            WHERE apps.deleted_at IS NULL
             """,
             params=app_params,
         )

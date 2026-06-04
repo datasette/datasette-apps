@@ -168,6 +168,94 @@ async def test_registry_create_stored_app_and_save_versions():
 
 
 @pytest.mark.asyncio
+async def test_registry_soft_deletes_stored_app_but_keeps_recoverable_rows():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Soft deleted app",
+        description="Kept for recovery",
+        html="<h1>Hello</h1>",
+        sql_databases=["_memory"],
+        stored_queries=["_memory/report"],
+        csp_origins=["https://api.github.com"],
+    )
+    await registry.update_stored_app(
+        app["id"],
+        "Soft deleted app",
+        "Updated before delete",
+        "<h1>Updated</h1>",
+        actor_id="alice",
+    )
+    await registry.record_access("alice", app["id"])
+    await registry.set_pinned("alice", app["id"], True)
+
+    await registry.delete_stored_app(app["id"], actor_id="alice")
+
+    assert await registry.get_app(app["id"]) is None
+    assert [listed["id"] for listed in await registry.list_apps(q="Soft")] == []
+    assert [listed["id"] for listed in await registry.list_pinned_apps("alice")] == []
+
+    deleted_app = await registry.get_app(app["id"], include_deleted=True)
+    assert deleted_app["deleted_at"] is not None
+    assert deleted_app["deleted_actor_id"] == "alice"
+    assert deleted_app["name"] == "Soft deleted app"
+
+    assert await registry.get_current_version(app["id"]) is None
+    assert await registry.get_version(app["id"], 1) is None
+    assert await registry.list_versions(app["id"]) == []
+    assert (await registry.get_current_version(app["id"], include_deleted=True))[
+        "version"
+    ] == 2
+    deleted_versions = await registry.list_versions(app["id"], include_deleted=True)
+    assert [revision["version"] for revision in deleted_versions] == [2, 1]
+
+    db = datasette.get_internal_database()
+    revision_count = (
+        await db.execute(
+            "SELECT count(*) AS count FROM app_revisions WHERE app_id = ?",
+            [app["id"]],
+        )
+    ).first()["count"]
+    sql_database_count = (
+        await db.execute(
+            "SELECT count(*) AS count FROM app_sql_databases WHERE app_id = ?",
+            [app["id"]],
+        )
+    ).first()["count"]
+    csp_origin_count = (
+        await db.execute(
+            "SELECT count(*) AS count FROM app_csp_origins WHERE app_id = ?",
+            [app["id"]],
+        )
+    ).first()["count"]
+    user_state_count = (
+        await db.execute(
+            "SELECT count(*) AS count FROM app_user_state WHERE app_id = ?",
+            [app["id"]],
+        )
+    ).first()["count"]
+    assert revision_count == 2
+    assert sql_database_count == 1
+    assert csp_origin_count == 1
+    assert user_state_count == 1
+
+    await db.execute_write(
+        """
+        UPDATE apps
+        SET deleted_at = NULL,
+            deleted_actor_id = NULL
+        WHERE id = ?
+        """,
+        [app["id"]],
+    )
+
+    recovered = await registry.get_app(app["id"])
+    assert recovered["id"] == app["id"]
+    assert (await registry.get_current_version(app["id"]))["version"] == 2
+
+
+@pytest.mark.asyncio
 async def test_registry_uses_app_revisions_delta_log_for_settings_changes():
     datasette = Datasette(memory=True)
     registry = Registry(datasette)

@@ -125,6 +125,16 @@
       <div class="datasette-app-form-actions">
         <button type="submit">Save app</button>
       </div>
+
+      {% if can_delete %}
+      <div class="datasette-app-danger-zone">
+        <h2>Delete app</h2>
+        <p class="datasette-app-form-help">
+          Hide this app and disable access to it. Revision history remains in the database for administrator recovery.
+        </p>
+        <a class="datasette-app-button datasette-app-danger-button" href="{{ urls.path('/-/apps/' ~ app.id ~ '/delete') }}">Delete app</a>
+      </div>
+      {% endif %}
     </aside>
   </div>
 </form>

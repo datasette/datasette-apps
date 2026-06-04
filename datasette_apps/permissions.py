@@ -24,7 +24,7 @@ class AppResource(Resource):
 
     @classmethod
     async def resources_sql(cls, datasette, actor=None):
-        return "SELECT 'apps' AS parent, id AS child FROM apps"
+        return "SELECT 'apps' AS parent, id AS child FROM apps WHERE deleted_at IS NULL"
 
 
 def register_app_actions():
@@ -42,6 +42,11 @@ def register_app_actions():
         Action(
             name="edit-app",
             description="Edit a Datasette app",
+            resource_class=AppResource,
+        ),
+        Action(
+            name="delete-app",
+            description="Delete a Datasette app",
             resource_class=AppResource,
         ),
         Action(
@@ -66,12 +71,13 @@ def app_permission_sql(actor, action):
             """,
             params={"actor_id": actor_id},
         )
-    if action not in {"view-app", "edit-app", "manage-app-access"}:
+    if action not in {"view-app", "edit-app", "delete-app", "manage-app-access"}:
         return None
 
     owner_actions = {
         "view-app": "Owner can view app",
         "edit-app": "Owner can edit app",
+        "delete-app": "Owner can delete app",
         "manage-app-access": "Owner can manage app access",
     }
     sql = """
@@ -83,6 +89,7 @@ def app_permission_sql(actor, action):
     WHERE actor_id = :actor_id
       AND :actor_id IS NOT NULL
       AND external = 0
+      AND deleted_at IS NULL
     """
     restriction_sql = """
     SELECT 'apps' AS parent,
@@ -91,18 +98,20 @@ def app_permission_sql(actor, action):
     WHERE actor_id = :actor_id
       AND :actor_id IS NOT NULL
       AND external = 0
+      AND deleted_at IS NULL
     """
     if action == "view-app":
         restriction_sql = """
         SELECT 'apps' AS parent,
                id AS child
         FROM apps
-        WHERE is_private = 0
-           OR (
-               actor_id = :actor_id
-               AND :actor_id IS NOT NULL
-               AND external = 0
-           )
+        WHERE deleted_at IS NULL
+          AND (is_private = 0
+               OR (
+                   actor_id = :actor_id
+                   AND :actor_id IS NOT NULL
+                   AND external = 0
+               ))
         """
     return PermissionSQL(
         source="datasette-apps",

@@ -161,6 +161,8 @@ APP_COLUMNS = """
     apps.is_private,
     apps.stored_queries,
     apps.current_version,
+    apps.deleted_at,
+    apps.deleted_actor_id,
     apps.created_at,
     apps.updated_at
 """
@@ -441,13 +443,13 @@ class Registry:
             row = conn.execute(
                 """
                 SELECT current_version, external, name, description, is_private,
-                       stored_queries
+                       stored_queries, deleted_at
                 FROM apps
                 WHERE id = ?
                 """,
                 (app_id,),
             ).fetchone()
-            if row is None:
+            if row is None or row["deleted_at"] is not None:
                 raise KeyError(app_id)
             if row["external"]:
                 raise ValueError("External apps cannot be edited by datasette-apps")
@@ -573,8 +575,9 @@ class Registry:
 
         await self.db.execute_write_fn(save)
 
-    async def get_current_version(self, app_id):
+    async def get_current_version(self, app_id, include_deleted=False):
         await self.ensure_tables()
+        deleted_filter = "" if include_deleted else "AND apps.deleted_at IS NULL"
         result = await self.db.execute(
             f"""
             SELECT {APP_REVISION_RESOLVED_COLUMNS}
@@ -582,13 +585,15 @@ class Registry:
             JOIN apps ON apps.id = app_revisions.app_id
             WHERE apps.id = :app_id
               AND app_revisions.version = apps.current_version
+              {deleted_filter}
             """,
             {"app_id": app_id},
         )
         return _row_to_version(result.first())
 
-    async def get_version(self, app_id, version):
+    async def get_version(self, app_id, version, include_deleted=False):
         await self.ensure_tables()
+        deleted_filter = "" if include_deleted else "AND apps.deleted_at IS NULL"
         result = await self.db.execute(
             f"""
             SELECT {APP_REVISION_RESOLVED_COLUMNS}
@@ -597,13 +602,15 @@ class Registry:
             WHERE apps.id = :app_id
               AND apps.external = 0
               AND app_revisions.version = :version
+              {deleted_filter}
             """,
             {"app_id": app_id, "version": version},
         )
         return _row_to_version(result.first())
 
-    async def list_versions(self, app_id):
+    async def list_versions(self, app_id, include_deleted=False):
         await self.ensure_tables()
+        deleted_filter = "" if include_deleted else "AND apps.deleted_at IS NULL"
         result = await self.db.execute(
             f"""
             SELECT {APP_REVISION_RESOLVED_COLUMNS}
@@ -611,6 +618,7 @@ class Registry:
             JOIN apps ON apps.id = app_revisions.app_id
             WHERE apps.id = :app_id
               AND apps.external = 0
+              {deleted_filter}
             ORDER BY app_revisions.version DESC
             """,
             {"app_id": app_id},
@@ -621,6 +629,36 @@ class Registry:
         await self.ensure_tables()
         await self.db.execute_write("DELETE FROM apps WHERE id = :id", {"id": id})
 
+    async def delete_stored_app(self, app_id, actor_id=None):
+        await self.ensure_tables()
+        now = _now()
+
+        def delete(conn):
+            row = conn.execute(
+                """
+                SELECT external, deleted_at
+                FROM apps
+                WHERE id = ?
+                """,
+                (app_id,),
+            ).fetchone()
+            if row is None or row["deleted_at"] is not None:
+                raise KeyError(app_id)
+            if row["external"]:
+                raise ValueError("External apps cannot be deleted by datasette-apps")
+            conn.execute(
+                """
+                UPDATE apps
+                SET deleted_at = ?,
+                    deleted_actor_id = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (now, actor_id, now, app_id),
+            )
+
+        await self.db.execute_write_fn(delete)
+
     async def remove_apps_for_source(self, source):
         await self.ensure_tables()
         await self.db.execute_write(
@@ -628,10 +666,17 @@ class Registry:
             {"source": source},
         )
 
-    async def get_app(self, id):
+    async def get_app(self, id, include_deleted=False):
         await self.ensure_tables()
+        deleted_filter = "" if include_deleted else "AND deleted_at IS NULL"
         result = await self.db.execute(
-            f"SELECT {APP_COLUMNS} FROM apps WHERE id = :id", {"id": id}
+            f"""
+            SELECT {APP_COLUMNS}
+            FROM apps
+            WHERE id = :id
+              {deleted_filter}
+            """,
+            {"id": id},
         )
         return _row_to_app(result.first())
 
@@ -669,6 +714,7 @@ class Registry:
                 JOIN apps_fts ON apps.rowid = apps_fts.rowid
                 {join_user_state}
                 WHERE apps_fts MATCH :q
+                  AND apps.deleted_at IS NULL
                 ORDER BY {order_by}
                 LIMIT :limit OFFSET :offset
             """.format(
@@ -683,6 +729,7 @@ class Registry:
                 SELECT {app_columns} {select_user_state}
                 FROM apps
                 {join_user_state}
+                WHERE apps.deleted_at IS NULL
                 ORDER BY {order_by}
                 LIMIT :limit OFFSET :offset
             """.format(
@@ -703,6 +750,7 @@ class Registry:
             JOIN app_user_state ON app_user_state.app_id = apps.id
             WHERE app_user_state.actor_id = :actor_id
               AND app_user_state.pinned_at IS NOT NULL
+              AND apps.deleted_at IS NULL
             ORDER BY
               COALESCE(app_user_state.last_accessed_at, app_user_state.pinned_at) DESC,
               apps.id DESC
@@ -778,6 +826,11 @@ class Registry:
         now = _now()
 
         def save(conn):
+            app_row = conn.execute(
+                "SELECT deleted_at FROM apps WHERE id = ?", (app_id,)
+            ).fetchone()
+            if app_row is None or app_row["deleted_at"] is not None:
+                raise KeyError(app_id)
             current = [
                 row["origin"]
                 for row in conn.execute(
@@ -851,9 +904,9 @@ class Registry:
 
         def save(conn):
             row = conn.execute(
-                "SELECT stored_queries FROM apps WHERE id = ?", (app_id,)
+                "SELECT stored_queries, deleted_at FROM apps WHERE id = ?", (app_id,)
             ).fetchone()
-            if row is None:
+            if row is None or row["deleted_at"] is not None:
                 raise KeyError(app_id)
             current = _decode_json(row["stored_queries"], [])
             if current == stored_queries:
@@ -883,6 +936,11 @@ class Registry:
         database_names = sorted(dict.fromkeys(database_names))
 
         def save(conn):
+            app_row = conn.execute(
+                "SELECT deleted_at FROM apps WHERE id = ?", (app_id,)
+            ).fetchone()
+            if app_row is None or app_row["deleted_at"] is not None:
+                raise KeyError(app_id)
             current = [
                 row["database_name"]
                 for row in conn.execute(
@@ -939,9 +997,9 @@ class Registry:
         def save(conn):
             is_private = 1 if mode == "private" else 0
             row = conn.execute(
-                "SELECT is_private FROM apps WHERE id = ?", (app_id,)
+                "SELECT is_private, deleted_at FROM apps WHERE id = ?", (app_id,)
             ).fetchone()
-            if row is None:
+            if row is None or row["deleted_at"] is not None:
                 raise KeyError(app_id)
             if row["is_private"] == is_private:
                 return

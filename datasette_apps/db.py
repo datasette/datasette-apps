@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS apps (
     is_private INTEGER NOT NULL DEFAULT 1,
     stored_queries TEXT NOT NULL DEFAULT '[]',
     current_version INTEGER,
+    deleted_at TEXT,
+    deleted_actor_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CHECK (external IN (0, 1)),
@@ -151,6 +153,10 @@ async def ensure_tables(datasette):
                 conn.execute(
                     "ALTER TABLE apps ADD COLUMN stored_queries TEXT NOT NULL DEFAULT '[]'"
                 )
+            if "deleted_at" not in app_columns:
+                conn.execute("ALTER TABLE apps ADD COLUMN deleted_at TEXT")
+            if "deleted_actor_id" not in app_columns:
+                conn.execute("ALTER TABLE apps ADD COLUMN deleted_actor_id TEXT")
         if "apps" in existing_tables:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS app_sql_databases (

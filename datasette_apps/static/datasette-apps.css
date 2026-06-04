@@ -479,6 +479,51 @@
   text-decoration: none;
 }
 
+.datasette-app-danger-zone {
+  border-top: 1px solid #ddd;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+}
+
+.datasette-app-danger-zone h2 {
+  color: #8a1f11;
+}
+
+.datasette-app-danger-button,
+.datasette-app-danger-button:link,
+.datasette-app-danger-button:visited,
+.datasette-app-form button.datasette-app-danger-button[type="submit"] {
+  background: #fff;
+  border: 1px solid #b3261e;
+  border-radius: 3px;
+  color: #b3261e;
+  cursor: pointer;
+  display: inline-block;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.4rem 0.7rem;
+  text-decoration: none;
+}
+
+.datasette-app-danger-button:hover,
+.datasette-app-danger-button:focus,
+.datasette-app-danger-button:active,
+.datasette-app-form button.datasette-app-danger-button[type="submit"]:hover,
+.datasette-app-form button.datasette-app-danger-button[type="submit"]:focus {
+  background: #b3261e;
+  border-color: #8a1f11;
+  color: #fff;
+  text-decoration: none;
+}
+
+.datasette-app-delete-form {
+  align-items: center;
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
 .datasette-app-pin-button[aria-pressed="true"] {
   background: #f4f4f4;
   border-color: #777;

@@ -414,6 +414,9 @@ async def edit_app(datasette, request):
         sql_databases = set(await registry.get_sql_databases(app_id))
         stored_queries = await registry.get_stored_queries(app_id)
         csp_origins = "\n".join(await registry.get_csp_origins(app_id))
+        can_delete = await datasette.allowed(
+            action="delete-app", resource=AppResource(app_id), actor=actor
+        )
         return Response.html(
             await datasette.render_template(
                 "app_edit.html",
@@ -432,6 +435,7 @@ async def edit_app(datasette, request):
                     "csp_origins": csp_origins,
                     "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
                     "codemirror_assets": _codemirror_assets(),
+                    "can_delete": can_delete,
                 },
                 request=request,
             )
@@ -462,6 +466,32 @@ async def edit_app(datasette, request):
         **update_kwargs,
     )
     return Response.redirect(f"/-/apps/{app_id}")
+
+
+async def delete_app(datasette, request):
+    actor = _require_actor(request)
+    app_id = request.url_vars["id"]
+    registry = Registry(datasette)
+    app = await registry.get_app(app_id)
+    if app is None or app["external"]:
+        raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "delete-app", app_id)
+    if request.method == "GET":
+        return Response.html(
+            await datasette.render_template(
+                "app_delete.html",
+                {
+                    "app": app,
+                },
+                request=request,
+            )
+        )
+
+    try:
+        await registry.delete_stored_app(app_id, actor_id=_actor_id(actor))
+    except (KeyError, ValueError) as e:
+        raise NotFound("App not found") from e
+    return Response.redirect("/-/apps")
 
 
 async def app_revision(datasette, request):
