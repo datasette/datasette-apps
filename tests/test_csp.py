@@ -30,6 +30,19 @@ def test_build_csp_includes_exact_connect_origins():
     )
 
 
+def test_build_csp_can_allow_insecure_origins_in_tests(monkeypatch):
+    monkeypatch.setenv("DATASETTE_APPS_ALLOW_INSECURE_TEST_CSP_ORIGINS", "1")
+
+    assert build_csp(["http://127.0.0.1:8000"]) == (
+        "default-src 'none'; script-src 'unsafe-inline'; "
+        "style-src 'unsafe-inline'; "
+        "script-src-elem 'unsafe-inline' http://127.0.0.1:8000; "
+        "style-src-elem 'unsafe-inline' http://127.0.0.1:8000; "
+        "img-src data: blob: http://127.0.0.1:8000; "
+        "connect-src http://127.0.0.1:8000;"
+    )
+
+
 @pytest.mark.parametrize(
     "origin",
     [

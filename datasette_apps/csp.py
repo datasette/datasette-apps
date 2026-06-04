@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from urllib.parse import urlsplit
 
 BASE_DIRECTIVES = [
@@ -26,8 +27,13 @@ def _is_localhost(hostname):
 
 def normalize_connect_origin(origin):
     parsed = urlsplit((origin or "").strip())
-    if parsed.scheme != "https":
+    allow_insecure_test_origins = os.environ.get(
+        "DATASETTE_APPS_ALLOW_INSECURE_TEST_CSP_ORIGINS"
+    )
+    if parsed.scheme != "https" and not allow_insecure_test_origins:
         raise ValueError("Only https:// origins are allowed")
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Only http:// and https:// origins are allowed")
     if not parsed.hostname:
         raise ValueError("Origin must include a host")
     if parsed.username or parsed.password:
@@ -39,7 +45,7 @@ def normalize_connect_origin(origin):
     hostname = parsed.hostname.lower()
     if "*" in hostname:
         raise ValueError("Wildcard hosts are not allowed")
-    if _is_localhost(hostname):
+    if _is_localhost(hostname) and not allow_insecure_test_origins:
         raise ValueError("Localhost origins are not allowed")
 
     # Accessing .port validates the port and raises ValueError if malformed.
@@ -50,7 +56,7 @@ def normalize_connect_origin(origin):
         netloc = hostname
     if port is not None:
         netloc = f"{netloc}:{port}"
-    return f"https://{netloc}"
+    return f"{parsed.scheme}://{netloc}"
 
 
 def build_csp(connect_origins):
