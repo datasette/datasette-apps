@@ -12,12 +12,11 @@ def _csp_meta(csp):
     )
 
 
-def iframe_bridge_script(link_token=""):
+def iframe_bridge_script():
     script = """<script id="datasette-apps-bridge">
 (function() {
   var nextId = 1;
   var pending = new Map();
-  var linkToken = __LINK_TOKEN__;
 
   function noopHistoryMethod() {
   }
@@ -143,7 +142,6 @@ def iframe_bridge_script(link_token=""):
     try {
       parent.postMessage({
         type: "datasette-app-open-link",
-        token: linkToken,
         url: url
       }, "*");
     } catch (ignore) {
@@ -291,15 +289,14 @@ def iframe_bridge_script(link_token=""):
   }
 })();
 </script>"""
-    return script.replace("__LINK_TOKEN__", _json_script_string(link_token))
+    return script
 
 
-def parent_bridge_script(app_id, iframe_id="datasette-app-frame", link_token=""):
+def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
     query_endpoint = f"/-/apps/{app_id}/query"
     script = """<script>
 (function() {
   var iframe = document.getElementById(__IFRAME_ID__);
-  var linkToken = __LINK_TOKEN__;
   var errors = [];
   var errorPanel = null;
   var errorCount = null;
@@ -520,9 +517,6 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", link_token="")
     }
     var message = event.data || {};
     if (message.type === "datasette-app-open-link") {
-      if (linkToken && message.token !== linkToken) {
-        return;
-      }
       showLinkModal(message.url || "");
       return;
     }
@@ -560,10 +554,8 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", link_token="")
   });
 })();
 </script>"""
-    return (
-        script.replace("__IFRAME_ID__", _json_script_string(iframe_id))
-        .replace("__QUERY_ENDPOINT__", _json_script_string(query_endpoint))
-        .replace("__LINK_TOKEN__", _json_script_string(link_token))
+    return script.replace("__IFRAME_ID__", _json_script_string(iframe_id)).replace(
+        "__QUERY_ENDPOINT__", _json_script_string(query_endpoint)
     )
 
 

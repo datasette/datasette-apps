@@ -103,14 +103,12 @@ def test_iframe_bridge_reports_app_errors_to_parent():
 
 
 def test_iframe_bridge_intercepts_external_link_clicks():
-    script = iframe_bridge_script("link-token")
+    script = iframe_bridge_script()
 
     assert 'id="datasette-apps-bridge"' in script
     assert 'type: "datasette-app-open-link"' in script
-    assert "token: linkToken" in script
     assert "event.preventDefault()" in script
     assert "event.isTrusted" in script
-    assert "link-token" in script
 
 
 def test_iframe_bridge_noops_history_mutation_methods():
@@ -132,11 +130,9 @@ def test_parent_bridge_renders_app_error_panel():
 
 
 def test_parent_bridge_renders_external_link_modal():
-    script = parent_bridge_script("app1", link_token="link-token")
+    script = parent_bridge_script("app1")
 
     assert "datasette-app-link-modal" in script
     assert "Open external link" in script
     assert 'message.type === "datasette-app-open-link"' in script
-    assert "message.token !== linkToken" in script
     assert 'window.open(url, "_blank", "noopener,noreferrer")' in script
-    assert "link-token" in script

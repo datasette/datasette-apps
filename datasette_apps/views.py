@@ -3,7 +3,6 @@ from __future__ import annotations
 import difflib
 import html
 import json
-import secrets
 from urllib.parse import urlencode
 
 from datasette import Forbidden, NotFound, Response
@@ -370,10 +369,7 @@ async def view_app(datasette, request):
         await registry.record_access(actor_id, app_id)
         state = await registry.get_user_state(actor_id, app_id)
     csp = build_csp(await registry.get_csp_origins(app_id))
-    link_token = secrets.token_urlsafe(16)
-    srcdoc = build_app_srcdoc(
-        version["html"], csp, iframe_bridge_script(link_token=link_token)
-    )
+    srcdoc = build_app_srcdoc(version["html"], csp, iframe_bridge_script())
     can_edit = await datasette.allowed(
         action="edit-app", resource=AppResource(app_id), actor=actor
     )
@@ -384,7 +380,7 @@ async def view_app(datasette, request):
                 "app": app,
                 "csp": csp,
                 "srcdoc": srcdoc,
-                "parent_bridge": parent_bridge_script(app_id, link_token=link_token),
+                "parent_bridge": parent_bridge_script(app_id),
                 "pinned": bool(state and state["pinned_at"]),
                 "current_path": request.path,
                 "can_edit": can_edit,
