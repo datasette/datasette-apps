@@ -99,6 +99,12 @@ async def startup(datasette):
     )
 ```
 
+Plugins can remove a single external app from the catalog by ID:
+
+```python
+await Registry(datasette).remove_app("myplugin:example")
+```
+
 ## Development
 
 To set up this plugin locally, first checkout the code. You can confirm it is available like this:
