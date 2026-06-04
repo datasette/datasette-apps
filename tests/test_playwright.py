@@ -423,14 +423,15 @@ const status = document.getElementById("status");
   const SECRET = result.rows[0].secret;
   const LEAK_URL = LEAK_BASE + "/leak?secret=" + encodeURIComponent(SECRET);
   const WS_LEAK_URL = LEAK_URL.replace(/^http/, "ws");
-  status.textContent = "attempted";
-  setTimeout(function() {{
+  window.runAttempt = function() {{
+    status.textContent = "attempted";
     try {{
 {attempt_script}
     }} catch (error) {{
       status.textContent = "attempted with error";
     }}
-  }}, 100);
+  }};
+  status.textContent = "ready";
 }})();
 </script>
 </body>
@@ -514,6 +515,53 @@ console.error("Playwright saw this app error");
         )
 
 
+def test_iframe_link_click_shows_parent_confirmation_modal(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<a id="external-link" href="https://example.com/docs?from=app#section">
+  Open docs
+</a>
+<p id="location">still here</p>""",
+            name="External link app",
+        )
+    )
+
+    with server, _browser_page() as page:
+        page.context.route(
+            "https://example.com/docs?from=app",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="text/html",
+                body="<title>External docs</title><h1>External docs</h1>",
+            ),
+        )
+        page.goto(server.app_url(app))
+        iframe = _iframe(page)
+        iframe.locator("#external-link").click()
+
+        modal = page.locator(".datasette-app-link-modal")
+        modal.wait_for(state="visible")
+        assert modal.locator("h2").inner_text() == "Open external link"
+        assert (
+            modal.locator(".datasette-app-link-url").inner_text()
+            == "https://example.com/docs?from=app#section"
+        )
+        assert iframe.locator("#location").inner_text() == "still here"
+
+        modal.locator("button", has_text="Cancel").click()
+        modal.wait_for(state="hidden")
+
+        iframe.locator("#external-link").click()
+        modal.wait_for(state="visible")
+        with page.expect_popup() as popup_info:
+            modal.locator("button", has_text="Open link").click()
+        popup = popup_info.value
+        popup.wait_for_load_state()
+        assert popup.url == "https://example.com/docs?from=app#section"
+
+
 def test_malicious_apps_cannot_exfiltrate_to_external_origin(tmp_path):
     content_db_path = tmp_path / "content.db"
     _create_secret_database(content_db_path)
@@ -530,7 +578,8 @@ def test_malicious_apps_cannot_exfiltrate_to_external_origin(tmp_path):
                 ), name
                 iframe = _iframe(page)
                 iframe.locator("#status").wait_for()
-                assert iframe.locator("#status").inner_text() == "attempted", name
+                assert iframe.locator("#status").inner_text() == "ready", name
+                iframe.evaluate("window.runAttempt()")
                 page.wait_for_timeout(300)
                 assert leak_server.requests == [], name
                 for open_page in page.context.pages:
@@ -561,7 +610,8 @@ def test_csp_allowlisted_origin_can_receive_exfiltrated_data(tmp_path, monkeypat
             assert response is not None
             iframe = _iframe(page)
             iframe.locator("#status").wait_for()
-            assert iframe.locator("#status").inner_text() == "attempted"
+            assert iframe.locator("#status").inner_text() == "ready"
+            iframe.evaluate("window.runAttempt()")
             leak_server.wait_for_request_count(1)
 
         assert leak_server.requests == [

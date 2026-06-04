@@ -13,7 +13,7 @@ def _csp_meta(csp):
 
 
 def iframe_bridge_script():
-    return """<script>
+    script = """<script id="datasette-apps-bridge">
 (function() {
   var nextId = 1;
   var pending = new Map();
@@ -91,6 +91,62 @@ def iframe_bridge_script():
     } catch (ignore) {
     }
   }
+
+  function externalLinkUrl(anchor) {
+    if (!anchor || !anchor.href || anchor.hasAttribute("download")) {
+      return "";
+    }
+    try {
+      var url = new URL(anchor.href);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return "";
+      }
+      return url.href;
+    } catch (ignore) {
+      return "";
+    }
+  }
+
+  function closestAnchor(element) {
+    while (element && element !== document) {
+      if (
+        element.tagName &&
+        element.tagName.toLowerCase() === "a" &&
+        element.hasAttribute("href")
+      ) {
+        return element;
+      }
+      element = element.parentNode;
+    }
+    return null;
+  }
+
+  window.addEventListener("click", function(event) {
+    if (
+      !event.isTrusted ||
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    var anchor = closestAnchor(event.target);
+    var url = externalLinkUrl(anchor);
+    if (!url) {
+      return;
+    }
+    event.preventDefault();
+    try {
+      parent.postMessage({
+        type: "datasette-app-open-link",
+        url: url
+      }, "*");
+    } catch (ignore) {
+    }
+  }, true);
 
   window.addEventListener("error", function(event) {
     if (event.target && event.target !== window && event.target !== document) {
@@ -223,8 +279,18 @@ def iframe_bridge_script():
       });
     }
   };
+
+  try {
+    // Keep the injected bridge out of the app's DOM after it has initialized.
+    var bridgeScript = document.getElementById("datasette-apps-bridge");
+    if (bridgeScript && bridgeScript.parentNode) {
+      bridgeScript.parentNode.removeChild(bridgeScript);
+    }
+  } catch (ignore) {
+  }
 })();
 </script>"""
+    return script
 
 
 def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
@@ -236,6 +302,13 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
   var errorPanel = null;
   var errorCount = null;
   var errorList = null;
+  var linkModal = null;
+  var linkDialog = null;
+  var linkUrl = null;
+  var linkCancelButton = null;
+  var linkOpenButton = null;
+  var pendingLinkUrl = "";
+  var previousFocus = null;
 
   function appendText(parent, tagName, className, text) {
     var element = document.createElement(tagName);
@@ -327,11 +400,127 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
     renderErrors();
   }
 
+  function normalizedExternalUrl(value) {
+    if (typeof value !== "string") {
+      return "";
+    }
+    value = value.trim();
+    if (!/^https?:\\/\\//i.test(value)) {
+      return "";
+    }
+    try {
+      var url = new URL(value);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return "";
+      }
+      return url.href;
+    } catch (ignore) {
+      return "";
+    }
+  }
+
+  function hideLinkModal() {
+    if (!linkModal) {
+      return;
+    }
+    linkModal.hidden = true;
+    pendingLinkUrl = "";
+    if (previousFocus && typeof previousFocus.focus === "function") {
+      try {
+        previousFocus.focus();
+      } catch (ignore) {
+      }
+    }
+    previousFocus = null;
+  }
+
+  function ensureLinkModal() {
+    if (linkModal) {
+      return;
+    }
+    linkModal = document.createElement("div");
+    linkModal.className = "datasette-app-link-modal";
+    linkModal.hidden = true;
+
+    linkDialog = document.createElement("div");
+    linkDialog.className = "datasette-app-link-dialog";
+    linkDialog.setAttribute("role", "dialog");
+    linkDialog.setAttribute("aria-modal", "true");
+    linkDialog.setAttribute("aria-labelledby", "datasette-app-link-title");
+    linkModal.appendChild(linkDialog);
+
+    appendText(linkDialog, "h2", null, "Open external link").id = "datasette-app-link-title";
+    appendText(
+      linkDialog,
+      "p",
+      "datasette-app-link-message",
+      "You're leaving Datasette to visit an external link:"
+    );
+    linkUrl = appendText(linkDialog, "div", "datasette-app-link-url", "");
+
+    var actions = document.createElement("div");
+    actions.className = "datasette-app-link-actions";
+    linkDialog.appendChild(actions);
+
+    linkCancelButton = document.createElement("button");
+    linkCancelButton.type = "button";
+    linkCancelButton.className = "datasette-app-link-cancel";
+    linkCancelButton.textContent = "Cancel";
+    actions.appendChild(linkCancelButton);
+
+    linkOpenButton = document.createElement("button");
+    linkOpenButton.type = "button";
+    linkOpenButton.className = "datasette-app-link-open";
+    linkOpenButton.textContent = "Open link";
+    actions.appendChild(linkOpenButton);
+
+    linkCancelButton.addEventListener("click", hideLinkModal);
+    linkOpenButton.addEventListener("click", function() {
+      var url = pendingLinkUrl;
+      hideLinkModal();
+      if (url) {
+        var opened = window.open(url, "_blank", "noopener,noreferrer");
+        if (opened) {
+          opened.opener = null;
+        }
+      }
+    });
+    linkModal.addEventListener("click", function(event) {
+      if (event.target === linkModal) {
+        hideLinkModal();
+      }
+    });
+    document.addEventListener("keydown", function(event) {
+      if (event.key === "Escape" && linkModal && !linkModal.hidden) {
+        hideLinkModal();
+      }
+    });
+
+    document.body.appendChild(linkModal);
+  }
+
+  function showLinkModal(url) {
+    url = normalizedExternalUrl(url);
+    if (!url) {
+      return;
+    }
+    ensureLinkModal();
+    previousFocus = document.activeElement;
+    pendingLinkUrl = url;
+    linkUrl.textContent = url;
+    linkModal.hidden = false;
+    linkCancelButton.focus();
+  }
+
   window.addEventListener("message", async function(event) {
     if (!iframe || event.source !== iframe.contentWindow) {
       return;
     }
     var message = event.data || {};
+    if (message.type === "datasette-app-open-link") {
+      showLinkModal(message.url || "");
+      return;
+    }
     if (message.type === "datasette-app-error") {
       addAppError(message.error || {});
       return;
@@ -380,6 +569,10 @@ def build_app_srcdoc(source, csp, bridge_script=""):
     security_head = _csp_meta(csp) + (bridge_script or "")
     doctype_match = re.match(r"\s*<!doctype html\s*>", source, flags=re.IGNORECASE)
     if doctype_match:
-        return source[: doctype_match.end()] + security_head + source[doctype_match.end() :]
+        return (
+            source[: doctype_match.end()]
+            + security_head
+            + source[doctype_match.end() :]
+        )
 
     return security_head + source
