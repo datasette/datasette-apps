@@ -167,82 +167,56 @@ APP_COLUMNS = """
     apps.updated_at
 """
 
-APP_REVISION_RESOLVED_COLUMNS = """
-    app_revisions.app_id,
-    app_revisions.version,
-    app_revisions.actor_id,
-    app_revisions.name AS revision_name,
-    app_revisions.description AS revision_description,
-    app_revisions.html AS revision_html,
-    app_revisions.is_private AS revision_is_private,
-    app_revisions.sql_databases AS revision_sql_databases,
-    app_revisions.stored_queries AS revision_stored_queries,
-    app_revisions.csp_origins AS revision_csp_origins,
-    app_revisions.changed_fields,
-    app_revisions.created_at,
-    (
-        SELECT previous.name
-        FROM app_revisions AS previous
-        WHERE previous.app_id = app_revisions.app_id
-          AND previous.version <= app_revisions.version
-          AND previous.name IS NOT NULL
-        ORDER BY previous.version DESC
-        LIMIT 1
-    ) AS name,
-    (
-        SELECT previous.description
-        FROM app_revisions AS previous
-        WHERE previous.app_id = app_revisions.app_id
-          AND previous.version <= app_revisions.version
-          AND previous.description IS NOT NULL
-        ORDER BY previous.version DESC
-        LIMIT 1
-    ) AS description,
-    (
-        SELECT previous.html
-        FROM app_revisions AS previous
-        WHERE previous.app_id = app_revisions.app_id
-          AND previous.version <= app_revisions.version
-          AND previous.html IS NOT NULL
-        ORDER BY previous.version DESC
-        LIMIT 1
-    ) AS html,
-    (
-        SELECT previous.is_private
-        FROM app_revisions AS previous
-        WHERE previous.app_id = app_revisions.app_id
-          AND previous.version <= app_revisions.version
-          AND previous.is_private IS NOT NULL
-        ORDER BY previous.version DESC
-        LIMIT 1
-    ) AS is_private,
-    (
-        SELECT previous.sql_databases
-        FROM app_revisions AS previous
-        WHERE previous.app_id = app_revisions.app_id
-          AND previous.version <= app_revisions.version
-          AND previous.sql_databases IS NOT NULL
-        ORDER BY previous.version DESC
-        LIMIT 1
-    ) AS sql_databases,
-    (
-        SELECT previous.stored_queries
-        FROM app_revisions AS previous
-        WHERE previous.app_id = app_revisions.app_id
-          AND previous.version <= app_revisions.version
-          AND previous.stored_queries IS NOT NULL
-        ORDER BY previous.version DESC
-        LIMIT 1
-    ) AS stored_queries,
-    (
-        SELECT previous.csp_origins
-        FROM app_revisions AS previous
-        WHERE previous.app_id = app_revisions.app_id
-          AND previous.version <= app_revisions.version
-          AND previous.csp_origins IS NOT NULL
-        ORDER BY previous.version DESC
-        LIMIT 1
-    ) AS csp_origins
+# The revision log is a delta log: each row stores only the columns that
+# changed in that revision (everything else is NULL). To present a fully
+# resolved revision we forward-fill each value column from the most recent
+# non-null revision at or before the target version (last-observation-carried-
+# forward).
+#
+# We resolve every column in a single ordered pass with window functions
+# instead of a correlated subquery per column. A correlated subquery re-scans
+# the history for each row and degrades to O(n^2) when a column is rarely
+# edited (e.g. csp_origins set once at creation while html is edited
+# hundreds of times). The window pass stays O(n):
+#
+#   1. SQLite has no IGNORE NULLS for window functions, so we use the running-
+#      count grouping trick: count(col) ignores NULLs, so a running count over
+#      the version order increments only on non-null rows. Every run of rows
+#      since the last non-null therefore shares one group id (_g_<col>).
+#   2. Exactly one row per group is non-null (the row that set the value), so
+#      max(col) over that group returns the value carried forward.
+#
+# Callers must bind :app_id; the CTE is scoped and partitioned to a single app.
+_REVISION_VALUE_COLUMNS = ", ".join(APP_REVISION_VALUE_FIELDS)
+_REVISION_GROUP_COLUMNS = ",\n            ".join(
+    f"count({field}) OVER w AS _g_{field}" for field in APP_REVISION_VALUE_FIELDS
+)
+_REVISION_RAW_COLUMNS = ",\n            ".join(
+    f"{field} AS revision_{field}" for field in APP_REVISION_VALUE_FIELDS
+)
+_REVISION_FILLED_COLUMNS = ",\n            ".join(
+    f"max({field}) OVER (PARTITION BY app_id, _g_{field}) AS {field}"
+    for field in APP_REVISION_VALUE_FIELDS
+)
+
+APP_REVISION_RESOLVED_CTE = f"""
+    _revision_groups AS (
+        SELECT
+            app_id, version, actor_id, changed_fields, created_at,
+            {_REVISION_VALUE_COLUMNS},
+            {_REVISION_GROUP_COLUMNS}
+        FROM app_revisions
+        WHERE app_id = :app_id
+        WINDOW w AS (PARTITION BY app_id ORDER BY version)
+    ),
+    resolved AS (
+        SELECT
+            app_id, version, actor_id,
+            {_REVISION_RAW_COLUMNS},
+            changed_fields, created_at,
+            {_REVISION_FILLED_COLUMNS}
+        FROM _revision_groups
+    )
 """
 
 APP_USER_STATE_COLUMNS = """
@@ -617,11 +591,11 @@ class Registry:
         deleted_filter = "" if include_deleted else "AND apps.deleted_at IS NULL"
         result = await self.db.execute(
             f"""
-            SELECT {APP_REVISION_RESOLVED_COLUMNS}
-            FROM app_revisions
-            JOIN apps ON apps.id = app_revisions.app_id
-            WHERE apps.id = :app_id
-              AND app_revisions.version = apps.current_version
+            WITH {APP_REVISION_RESOLVED_CTE}
+            SELECT resolved.*
+            FROM resolved
+            JOIN apps ON apps.id = resolved.app_id
+            WHERE resolved.version = apps.current_version
               {deleted_filter}
             """,
             {"app_id": app_id},
@@ -633,12 +607,12 @@ class Registry:
         deleted_filter = "" if include_deleted else "AND apps.deleted_at IS NULL"
         result = await self.db.execute(
             f"""
-            SELECT {APP_REVISION_RESOLVED_COLUMNS}
-            FROM app_revisions
-            JOIN apps ON apps.id = app_revisions.app_id
-            WHERE apps.id = :app_id
-              AND apps.external = 0
-              AND app_revisions.version = :version
+            WITH {APP_REVISION_RESOLVED_CTE}
+            SELECT resolved.*
+            FROM resolved
+            JOIN apps ON apps.id = resolved.app_id
+            WHERE apps.external = 0
+              AND resolved.version = :version
               {deleted_filter}
             """,
             {"app_id": app_id, "version": version},
@@ -650,13 +624,13 @@ class Registry:
         deleted_filter = "" if include_deleted else "AND apps.deleted_at IS NULL"
         result = await self.db.execute(
             f"""
-            SELECT {APP_REVISION_RESOLVED_COLUMNS}
-            FROM app_revisions
-            JOIN apps ON apps.id = app_revisions.app_id
-            WHERE apps.id = :app_id
-              AND apps.external = 0
+            WITH {APP_REVISION_RESOLVED_CTE}
+            SELECT resolved.*
+            FROM resolved
+            JOIN apps ON apps.id = resolved.app_id
+            WHERE apps.external = 0
               {deleted_filter}
-            ORDER BY app_revisions.version DESC
+            ORDER BY resolved.version DESC
             """,
             {"app_id": app_id},
         )

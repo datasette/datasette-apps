@@ -108,10 +108,12 @@ async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
     assert "history.replaceState()" in response.text
     assert "history.pushState()" in response.text
     assert '"schema_by_database": {"content": "Database: content' in response.text
-    assert "table: news" in response.text
-    assert response.text.index("table: news") < response.text.index("table: _drafts")
-    assert "title TEXT" in response.text
-    assert "author_id -\\u003e authors.id" in response.text
+    assert "CREATE TABLE news" in response.text
+    assert response.text.index("CREATE TABLE news") < response.text.index(
+        "CREATE TABLE _drafts"
+    )
+    assert "title text" in response.text
+    assert "references authors(id)" in response.text
     assert "Currently selected stored queries" in response.text
     assert "content/author_lookup: Author lookup (read-only)" not in response.text
 
@@ -161,5 +163,5 @@ async def test_create_page_prompt_does_not_leak_hidden_schema(tmp_path):
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
 
     assert response.status_code == 200
-    assert "table: news" not in response.text
-    assert "table: authors" not in response.text
+    assert "CREATE TABLE news" not in response.text
+    assert "CREATE TABLE authors" not in response.text

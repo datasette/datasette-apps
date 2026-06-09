@@ -5,55 +5,35 @@ from datasette.resources import TableResource
 from .utils import sort_names_with_underscores_last
 
 
-def _quote_identifier(identifier):
-    return '"' + identifier.replace('"', '""') + '"'
-
-
-async def _row_count(db, resource):
-    try:
-        result = await db.execute(f"select count(*) from {_quote_identifier(resource)}")
-        return result.single_value()
-    except Exception:
-        return None
-
-
 async def _schema_by_database(datasette, actor):
     schemas = {}
     for database_name, db in datasette.databases.items():
         if database_name == "_internal":
             continue
-        lines = []
-        for resource_type, names in (
-            ("table", sort_names_with_underscores_last(await db.table_names())),
-            ("view", await db.view_names()),
+        result = await db.execute(
+            "select name, sql from sqlite_master"
+            " where type in ('table', 'view') and sql is not null"
+        )
+        sql_by_name = {row["name"]: row["sql"] for row in result.rows}
+        statements = []
+        for names in (
+            sort_names_with_underscores_last(await db.table_names()),
+            await db.view_names(),
         ):
             for resource_name in names:
+                if resource_name not in sql_by_name:
+                    continue
                 if not await datasette.allowed(
                     action="view-table",
                     resource=TableResource(database_name, resource_name),
                     actor=actor,
                 ):
                     continue
-                lines.append(f"- {resource_type}: {resource_name}")
-                columns = await db.table_column_details(resource_name)
-                for column in columns:
-                    column_type = column.type or "unknown"
-                    lines.append(f"  - {column.name} {column_type}")
-                primary_keys = await db.primary_keys(resource_name)
-                if primary_keys:
-                    lines.append(f"  primary key: {', '.join(primary_keys)}")
-                foreign_keys = await db.foreign_keys_for_table(resource_name)
-                for foreign_key in foreign_keys:
-                    lines.append(
-                        "  foreign key: "
-                        f"{foreign_key['column']} -> "
-                        f"{foreign_key['other_table']}.{foreign_key['other_column']}"
-                    )
-                count = await _row_count(db, resource_name)
-                if count is not None:
-                    lines.append(f"  row count: {count}")
-        if lines:
-            schemas[database_name] = f"Database: {database_name}\n" + "\n".join(lines)
+                statements.append(sql_by_name[resource_name].strip())
+        if statements:
+            schemas[database_name] = f"Database: {database_name}\n" + ";\n".join(
+                statements
+            )
     return schemas
 
 
