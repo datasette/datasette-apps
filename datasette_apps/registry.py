@@ -575,6 +575,43 @@ class Registry:
 
         await self.db.execute_write_fn(save)
 
+    async def edit_stored_app_html(self, app_id, transform, actor_id=None):
+        """Atomically transform the current HTML for a stored app."""
+        await self.ensure_tables()
+        now = _now()
+
+        def save(conn):
+            row = conn.execute(
+                """
+                SELECT current_version, external, deleted_at
+                FROM apps
+                WHERE id = ?
+                """,
+                (app_id,),
+            ).fetchone()
+            if row is None or row["deleted_at"] is not None:
+                raise KeyError(app_id)
+            if row["external"]:
+                raise ValueError("External apps cannot be edited by datasette-apps")
+            current_html_row = conn.execute(
+                """
+                SELECT html
+                FROM app_revisions
+                WHERE app_id = ?
+                  AND html IS NOT NULL
+                ORDER BY version DESC
+                LIMIT 1
+                """,
+                (app_id,),
+            ).fetchone()
+            current_html = current_html_row["html"] if current_html_row else ""
+            new_html = transform(current_html)
+            if new_html != current_html:
+                _insert_revision(conn, app_id, {"html": new_html}, now, actor_id)
+
+        await self.db.execute_write_fn(save)
+        return await self.get_current_version(app_id)
+
     async def get_current_version(self, app_id, include_deleted=False):
         await self.ensure_tables()
         deleted_filter = "" if include_deleted else "AND apps.deleted_at IS NULL"

@@ -106,3 +106,12 @@ def menu_links(datasette, actor, request):
     if not actor:
         return []
     return [{"href": datasette.urls.path("/-/apps"), "label": "Apps"}]
+
+
+@hookimpl(optionalhook=True)
+def register_agent_tools(datasette):
+    from datasette_agent.tools import AgentTool
+
+    from .agent_tools import get_app_edit_tools
+
+    return get_app_edit_tools(AgentTool)

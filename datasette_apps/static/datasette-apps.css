@@ -32,6 +32,29 @@
   margin: 0;
 }
 
+.datasette-app-agent-tool {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+}
+
+.datasette-app-agent-tool-status {
+  min-width: 0;
+}
+
+.datasette-app-agent-tool-actions {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.datasette-app-agent-tool .datasette-app-button {
+  font-size: 0.9rem;
+  padding: 0.35rem 0.6rem;
+}
+
 .datasette-app-error-panel {
   background: #fffaf0;
   border: 1px solid #d8c48f;
