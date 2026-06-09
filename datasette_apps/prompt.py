@@ -31,8 +31,8 @@ async def _schema_by_database(datasette, actor):
                     continue
                 statements.append(sql_by_name[resource_name].strip())
         if statements:
-            schemas[database_name] = (
-                f"Database: {database_name}\n" + ";\n".join(statements)
+            schemas[database_name] = f"Database: {database_name}\n" + ";\n".join(
+                statements
             )
     return schemas
 
