@@ -170,6 +170,10 @@ def iframe_bridge_script(channel_token=None):
     if (!anchor || !anchor.href || anchor.hasAttribute("download")) {
       return "";
     }
+    var rawHref = (anchor.getAttribute("href") || "").trim();
+    if (!rawHref || rawHref.charAt(0) === "#") {
+      return "";
+    }
     try {
       var url = new URL(anchor.href);
       if (url.protocol !== "http:" && url.protocol !== "https:") {

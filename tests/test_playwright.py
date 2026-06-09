@@ -726,6 +726,34 @@ def test_iframe_link_click_shows_parent_confirmation_modal(tmp_path):
         assert popup.url == "https://example.com/docs?from=app#section"
 
 
+def test_iframe_hash_link_click_runs_app_handler_without_parent_modal(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<a id="internal-action" href="#" onclick="selectItem(); return false;">
+  Select item
+</a>
+<p id="status">waiting</p>
+<script>
+function selectItem() {
+  document.getElementById("status").textContent = "selected";
+}
+</script>""",
+            name="Hash link action app",
+        )
+    )
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app))
+        iframe = _iframe(page)
+        iframe.locator("#internal-action").click()
+
+        iframe.locator("#status", has_text="selected").wait_for()
+        page.wait_for_timeout(200)
+        assert page.locator(".datasette-app-link-modal").count() == 0
+
+
 def test_malicious_apps_cannot_exfiltrate_to_external_origin(tmp_path):
     content_db_path = tmp_path / "content.db"
     _create_secret_database(content_db_path)

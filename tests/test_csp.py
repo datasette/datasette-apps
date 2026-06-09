@@ -122,6 +122,7 @@ def test_iframe_bridge_intercepts_external_link_clicks():
     assert 'type: "datasette-app-open-link"' in script
     assert "event.preventDefault()" in script
     assert "event.isTrusted" in script
+    assert 'rawHref.charAt(0) === "#"' in script
 
 
 def test_iframe_bridge_noops_history_mutation_methods():
