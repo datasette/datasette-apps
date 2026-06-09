@@ -95,6 +95,8 @@ def test_build_app_srcdoc_injects_datasette_query_bridge_after_csp():
 def test_iframe_bridge_reports_app_errors_to_parent():
     script = iframe_bridge_script()
 
+    assert "new MessageChannel()" in script
+    assert 'type: "datasette-app-channel-ready"' in script
     assert 'type: "datasette-app-error"' in script
     assert "securitypolicyviolation" in script
     assert "unhandledrejection" in script
@@ -123,6 +125,8 @@ def test_iframe_bridge_noops_history_mutation_methods():
 def test_parent_bridge_renders_app_error_panel():
     script = parent_bridge_script("app1")
 
+    assert "acceptBridgePort" in script
+    assert "event.ports[0]" in script
     assert "datasette-app-error-panel" in script
     assert "datasette-app-error-list" in script
     assert 'message.type === "datasette-app-error"' in script

@@ -12,11 +12,15 @@ def _csp_meta(csp):
     )
 
 
-def iframe_bridge_script():
+def iframe_bridge_script(channel_token=None):
+    if channel_token is None:
+        channel_token = "datasette-apps-test-channel"
     script = """<script id="datasette-apps-bridge">
 (function() {
   var nextId = 1;
   var pending = new Map();
+  var channelToken = __CHANNEL_TOKEN__;
+  var bridgePort = null;
 
   function noopHistoryMethod() {
   }
@@ -79,17 +83,24 @@ def iframe_bridge_script():
     return details;
   }
 
+  function postToParent(message) {
+    if (!bridgePort) {
+      return;
+    }
+    try {
+      bridgePort.postMessage(message);
+    } catch (ignore) {
+    }
+  }
+
   function postAppError(kind, details) {
     details = details || {};
     details.kind = kind;
     details.timestamp = new Date().toISOString();
-    try {
-      parent.postMessage({
-        type: "datasette-app-error",
-        error: details
-      }, "*");
-    } catch (ignore) {
-    }
+    postToParent({
+      type: "datasette-app-error",
+      error: details
+    });
   }
 
   function externalLinkUrl(anchor) {
@@ -139,13 +150,10 @@ def iframe_bridge_script():
       return;
     }
     event.preventDefault();
-    try {
-      parent.postMessage({
-        type: "datasette-app-open-link",
-        url: url
-      }, "*");
-    } catch (ignore) {
-    }
+    postToParent({
+      type: "datasette-app-open-link",
+      url: url
+    });
   }, true);
 
   window.addEventListener("error", function(event) {
@@ -231,7 +239,7 @@ def iframe_bridge_script():
     };
   }
 
-  window.addEventListener("message", function(event) {
+  function handleBridgeMessage(event) {
     var message = event.data || {};
     if (message.type !== "datasette-app-response" || !pending.has(message.id)) {
       return;
@@ -245,7 +253,22 @@ def iframe_bridge_script():
       postAppError(callbacks.errorKind || "datasette-query-error", {message: errorMessage});
       callbacks.reject(new Error(errorMessage));
     }
-  });
+  }
+
+  try {
+    var bridgeChannel = new MessageChannel();
+    bridgePort = bridgeChannel.port1;
+    bridgePort.onmessage = handleBridgeMessage;
+    if (typeof bridgePort.start === "function") {
+      bridgePort.start();
+    }
+    parent.postMessage({
+      type: "datasette-app-channel-ready",
+      token: channelToken
+    }, "*", [bridgeChannel.port2]);
+  } catch (ignore) {
+    bridgePort = null;
+  }
 
   window.datasette = {
     query: function(database, sql, params) {
@@ -256,11 +279,11 @@ def iframe_bridge_script():
           reject: reject,
           errorKind: "datasette-query-error"
         });
-        parent.postMessage({
+        postToParent({
           type: "datasette-app-query",
           id: id,
           input: {database: database, sql: sql, params: params || {}}
-        }, "*");
+        });
       });
     },
     storedQuery: function(database, query, params) {
@@ -271,11 +294,11 @@ def iframe_bridge_script():
           reject: reject,
           errorKind: "datasette-stored-query-error"
         });
-        parent.postMessage({
+        postToParent({
           type: "datasette-app-stored-query",
           id: id,
           input: {database: database, query: query, params: params || {}}
-        }, "*");
+        });
       });
     }
   };
@@ -293,14 +316,18 @@ def iframe_bridge_script():
   }
 })();
 </script>"""
-    return script
+    return script.replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
 
 
-def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
+def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=None):
+    if channel_token is None:
+        channel_token = "datasette-apps-test-channel"
     query_endpoint = f"/-/apps/{app_id}/query"
     script = """<script>
 (function() {
-  var iframe = document.getElementById(__IFRAME_ID__);
+  var channelToken = __CHANNEL_TOKEN__;
+  var bridgePort = null;
+  var channelEstablished = false;
   var errors = [];
   var errorPanel = null;
   var errorCount = null;
@@ -312,6 +339,10 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
   var linkOpenButton = null;
   var pendingLinkUrl = "";
   var previousFocus = null;
+
+  function getIframe() {
+    return document.getElementById(__IFRAME_ID__);
+  }
 
   function appendText(parent, tagName, className, text) {
     var element = document.createElement(tagName);
@@ -339,6 +370,7 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
     errorList.className = "datasette-app-error-list";
     errorPanel.appendChild(errorList);
 
+    var iframe = getIframe();
     if (iframe && iframe.parentNode) {
       iframe.parentNode.insertBefore(errorPanel, iframe);
     }
@@ -515,10 +547,7 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
     linkCancelButton.focus();
   }
 
-  window.addEventListener("message", async function(event) {
-    if (!iframe || event.source !== iframe.contentWindow) {
-      return;
-    }
+  async function handleBridgeMessage(event) {
     var message = event.data || {};
     if (message.type === "datasette-app-open-link") {
       showLinkModal(message.url || "");
@@ -554,12 +583,41 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame"):
     } catch (error) {
       reply.error = String(error);
     }
-    event.source.postMessage(reply, "*");
-  });
+    if (bridgePort) {
+      bridgePort.postMessage(reply);
+    }
+  }
+
+  function acceptBridgePort(event) {
+    var iframe = getIframe();
+    if (channelEstablished || !iframe || event.source !== iframe.contentWindow) {
+      return;
+    }
+    var message = event.data || {};
+    if (
+      message.type !== "datasette-app-channel-ready" ||
+      message.token !== channelToken ||
+      !event.ports ||
+      !event.ports[0]
+    ) {
+      return;
+    }
+    channelEstablished = true;
+    bridgePort = event.ports[0];
+    bridgePort.onmessage = handleBridgeMessage;
+    if (typeof bridgePort.start === "function") {
+      bridgePort.start();
+    }
+    window.removeEventListener("message", acceptBridgePort);
+  }
+
+  window.addEventListener("message", acceptBridgePort);
 })();
 </script>"""
-    return script.replace("__IFRAME_ID__", _json_script_string(iframe_id)).replace(
-        "__QUERY_ENDPOINT__", _json_script_string(query_endpoint)
+    return (
+        script.replace("__IFRAME_ID__", _json_script_string(iframe_id))
+        .replace("__QUERY_ENDPOINT__", _json_script_string(query_endpoint))
+        .replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
     )
 
 
