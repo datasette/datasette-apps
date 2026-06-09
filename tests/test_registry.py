@@ -308,6 +308,110 @@ async def test_registry_uses_app_revisions_delta_log_for_settings_changes():
 
 
 @pytest.mark.asyncio
+async def test_revision_forward_fill_resolves_each_version_as_of_that_version():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice", name="N1", description="D1", html="H1"
+    )
+    app_id = app["id"]
+    # v2 changes only html, v3 only name, v4 only description.
+    await registry.update_stored_app(app_id, "N1", "D1", "H2")
+    await registry.update_stored_app(app_id, "N2", "D1", "H2")
+    await registry.update_stored_app(app_id, "N2", "D2", "H2")
+
+    v1 = await registry.get_version(app_id, 1)
+    v2 = await registry.get_version(app_id, 2)
+    v3 = await registry.get_version(app_id, 3)
+    current = await registry.get_current_version(app_id)
+
+    # Each version resolves to the most recent non-null value at or before it.
+    assert (v1["name"], v1["description"], v1["html"]) == ("N1", "D1", "H1")
+    assert (v2["name"], v2["description"], v2["html"]) == ("N1", "D1", "H2")
+    assert (v3["name"], v3["description"], v3["html"]) == ("N2", "D1", "H2")
+    assert current["version"] == 4
+    assert (current["name"], current["description"], current["html"]) == (
+        "N2",
+        "D2",
+        "H2",
+    )
+    # The raw (per-revision) columns only carry the field that actually changed.
+    assert v3["revision_name"] == "N2"
+    assert v3["revision_html"] is None
+    assert v3["changed_fields"] == ["name"]
+
+
+@pytest.mark.asyncio
+async def test_revision_forward_fill_survives_many_single_field_edits():
+    # The pathological shape for the old correlated-subquery approach: one field
+    # (html) edited many times while the others were set once at creation.
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice", name="Stable", description="Stable desc", html="start"
+    )
+    app_id = app["id"]
+    for i in range(1, 61):
+        await registry.update_stored_app(app_id, "Stable", "Stable desc", f"v{i}")
+
+    revisions = await registry.list_versions(app_id)
+    assert len(revisions) == 61
+    # Every revision still resolves the name/description set only at v1.
+    assert all(r["name"] == "Stable" for r in revisions)
+    assert all(r["description"] == "Stable desc" for r in revisions)
+
+    assert (await registry.get_version(app_id, 1))["html"] == "start"
+    assert (await registry.get_version(app_id, 2))["html"] == "v1"
+    assert (await registry.get_version(app_id, 31))["html"] == "v30"
+    assert (await registry.get_current_version(app_id))["html"] == "v60"
+
+
+@pytest.mark.asyncio
+async def test_revision_forward_fill_does_not_bleed_between_apps():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app_a = await registry.create_stored_app(
+        actor_id="alice", name="A1", description="DA", html="HA"
+    )
+    app_b = await registry.create_stored_app(
+        actor_id="bob", name="B1", description="DB", html="HB"
+    )
+    # Interleave edits; each app changes a different field.
+    await registry.update_stored_app(app_a["id"], "A2", "DA", "HA")  # a: name
+    await registry.update_stored_app(app_b["id"], "B1", "DB", "HB2")  # b: html
+    await registry.set_csp_origins(app_a["id"], ["https://a.example.com"])
+    await registry.set_sql_databases(app_b["id"], ["_memory"])
+
+    current_a = await registry.get_current_version(app_a["id"])
+    current_b = await registry.get_current_version(app_b["id"])
+
+    assert (current_a["name"], current_a["description"], current_a["html"]) == (
+        "A2",
+        "DA",
+        "HA",
+    )
+    assert current_a["csp_origins"] == ["https://a.example.com"]
+    assert current_a["sql_databases"] == []
+    assert (current_b["name"], current_b["description"], current_b["html"]) == (
+        "B1",
+        "DB",
+        "HB2",
+    )
+    assert current_b["sql_databases"] == ["_memory"]
+    assert current_b["csp_origins"] == []
+
+    # No value from app B ever leaks into app A's resolved history (and vice versa).
+    for revision in await registry.list_versions(app_a["id"]):
+        assert revision["name"] in {"A1", "A2"}
+        assert revision["html"] == "HA"
+        assert revision["sql_databases"] == []
+    for revision in await registry.list_versions(app_b["id"]):
+        assert revision["name"] == "B1"
+        assert revision["html"] in {"HB", "HB2"}
+        assert revision["csp_origins"] == []
+
+
+@pytest.mark.asyncio
 async def test_registry_records_data_and_network_access_revision_deltas():
     datasette = Datasette(memory=True)
     registry = Registry(datasette)
