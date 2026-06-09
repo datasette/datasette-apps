@@ -21,6 +21,8 @@ def iframe_bridge_script(channel_token=None):
   var pending = new Map();
   var channelToken = __CHANNEL_TOKEN__;
   var bridgePort = null;
+  var lastViewportContent = null;
+  var viewportReporterStarted = false;
 
   function noopHistoryMethod() {
   }
@@ -90,6 +92,40 @@ def iframe_bridge_script(channel_token=None):
     try {
       bridgePort.postMessage(message);
     } catch (ignore) {
+    }
+  }
+
+  function viewportMetaContent() {
+    var metas = document.getElementsByTagName("meta");
+    for (var i = 0; i < metas.length; i += 1) {
+      if ((metas[i].getAttribute("name") || "").toLowerCase() === "viewport") {
+        return metas[i].getAttribute("content") || "";
+      }
+    }
+    return "";
+  }
+
+  function reportViewportMeta() {
+    var content = viewportMetaContent();
+    if (content === lastViewportContent) {
+      return;
+    }
+    lastViewportContent = content;
+    postToParent({
+      type: "datasette-app-viewport",
+      content: content
+    });
+  }
+
+  function startViewportReporter() {
+    if (viewportReporterStarted) {
+      return;
+    }
+    viewportReporterStarted = true;
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", reportViewportMeta, {once: true});
+    } else {
+      reportViewportMeta();
     }
   }
 
@@ -305,6 +341,7 @@ def iframe_bridge_script(channel_token=None):
       type: "datasette-app-channel-ready",
       token: channelToken
     }, "*", [bridgeChannel.port2]);
+    startViewportReporter();
   } catch (ignore) {
     bridgePort = null;
   }
@@ -370,13 +407,16 @@ def iframe_bridge_script(channel_token=None):
     return script.replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
 
 
-def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=None):
+def parent_bridge_script(
+    app_id, iframe_id="datasette-app-frame", channel_token=None, mirror_viewport=False
+):
     if channel_token is None:
         channel_token = "datasette-apps-test-channel"
     query_endpoint = f"/-/apps/{app_id}/query"
     script = """<script>
 (function() {
   var channelToken = __CHANNEL_TOKEN__;
+  var mirrorViewport = __MIRROR_VIEWPORT__;
   var bridgePort = null;
   var channelEstablished = false;
   var errors = [];
@@ -397,6 +437,39 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=
 
   function getIframe() {
     return document.getElementById(__IFRAME_ID__);
+  }
+
+  function mirroredViewportMeta() {
+    var viewport = document.querySelector("meta[name='viewport']");
+    if (viewport) {
+      viewport.setAttribute("data-datasette-apps-viewport", "mirrored");
+      return viewport;
+    }
+    viewport = document.createElement("meta");
+    viewport.name = "viewport";
+    viewport.setAttribute("data-datasette-apps-viewport", "mirrored");
+    document.head.appendChild(viewport);
+    return viewport;
+  }
+
+  function mirrorViewportMeta(content) {
+    if (!mirrorViewport || typeof content !== "string") {
+      return;
+    }
+    content = content.trim();
+    if (content.length > 500) {
+      content = content.slice(0, 500);
+    }
+    if (!content) {
+      var existing = document.querySelector(
+        "meta[name='viewport'][data-datasette-apps-viewport='mirrored']"
+      );
+      if (existing && existing.parentNode) {
+        existing.parentNode.removeChild(existing);
+      }
+      return;
+    }
+    mirroredViewportMeta().setAttribute("content", content);
   }
 
   function appendText(parent, tagName, className, text) {
@@ -689,6 +762,10 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=
       addAppLog(message.log || {});
       return;
     }
+    if (message.type === "datasette-app-viewport") {
+      mirrorViewportMeta(message.content || "");
+      return;
+    }
     if (
       message.type !== "datasette-app-query" &&
       message.type !== "datasette-app-stored-query"
@@ -750,6 +827,7 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=
         script.replace("__IFRAME_ID__", _json_script_string(iframe_id))
         .replace("__QUERY_ENDPOINT__", _json_script_string(query_endpoint))
         .replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
+        .replace("__MIRROR_VIEWPORT__", json.dumps(bool(mirror_viewport)))
     )
 
 

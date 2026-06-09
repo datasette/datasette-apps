@@ -106,6 +106,15 @@ def test_iframe_bridge_reports_app_errors_to_parent():
     assert 'type: "datasette-app-log"' in script
 
 
+def test_iframe_bridge_reports_viewport_meta_once_after_dom_load():
+    script = iframe_bridge_script()
+
+    assert 'type: "datasette-app-viewport"' in script
+    assert 'getElementsByTagName("meta")' in script
+    assert "DOMContentLoaded" in script
+    assert "MutationObserver" not in script
+
+
 def test_iframe_bridge_intercepts_external_link_clicks():
     script = iframe_bridge_script()
 
@@ -143,6 +152,15 @@ def test_parent_bridge_renders_app_log_panel():
     assert 'message.type === "datasette-app-log"' in script
     assert "logs.slice(-100)" in script
     assert "iframe.nextSibling" in script
+
+
+def test_parent_bridge_mirrors_viewport_only_when_enabled():
+    disabled = parent_bridge_script("app1", mirror_viewport=False)
+    enabled = parent_bridge_script("app1", mirror_viewport=True)
+
+    assert "var mirrorViewport = false;" in disabled
+    assert "var mirrorViewport = true;" in enabled
+    assert 'message.type === "datasette-app-viewport"' in enabled
 
 
 def test_parent_bridge_renders_external_link_modal():

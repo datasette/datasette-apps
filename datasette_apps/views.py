@@ -375,7 +375,8 @@ async def view_app(datasette, request):
     can_edit = await datasette.allowed(
         action="edit-app", resource=AppResource(app_id), actor=actor
     )
-    template = "app_full.html" if request.args.get("full") == "1" else "app_view.html"
+    full_screen = request.args.get("full") == "1"
+    template = "app_full.html" if full_screen else "app_view.html"
     return Response.html(
         await datasette.render_template(
             template,
@@ -384,7 +385,7 @@ async def view_app(datasette, request):
                 "csp": csp,
                 "srcdoc": srcdoc,
                 "parent_bridge": parent_bridge_script(
-                    app_id, channel_token=bridge_token
+                    app_id, channel_token=bridge_token, mirror_viewport=full_screen
                 ),
                 "pinned": bool(state and state["pinned_at"]),
                 "current_path": request.path,
