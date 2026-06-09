@@ -108,6 +108,7 @@ async def test_app_links_respect_base_url():
     assert f'href="/prefix/-/apps/{app["id"]}"' in list_response.text
 
     assert 'href="/prefix/-/apps"' in view_response.text
+    assert f'href="/prefix/-/apps/{app["id"]}?full=1"' in view_response.text
     assert f'href="/prefix/-/apps/{app["id"]}/edit"' in view_response.text
     assert f'action="/prefix/-/apps/{app["id"]}/pin"' in view_response.text
 

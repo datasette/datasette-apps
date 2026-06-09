@@ -375,9 +375,10 @@ async def view_app(datasette, request):
     can_edit = await datasette.allowed(
         action="edit-app", resource=AppResource(app_id), actor=actor
     )
+    template = "app_full.html" if request.args.get("full") == "1" else "app_view.html"
     return Response.html(
         await datasette.render_template(
-            "app_view.html",
+            template,
             {
                 "app": app,
                 "csp": csp,

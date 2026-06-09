@@ -32,6 +32,24 @@
   margin: 0;
 }
 
+.datasette-app-action-stack {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.datasette-app-secondary-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.datasette-app-frame {
+  border: 1px solid #ccc;
+  min-height: 70vh;
+  width: 100%;
+}
+
 .datasette-app-agent-tool {
   align-items: center;
   display: flex;
@@ -632,6 +650,23 @@
   border-color: #276890;
   color: #276890;
   text-decoration: none;
+}
+
+.datasette-app-fullscreen-button,
+.datasette-app-fullscreen-button:link,
+.datasette-app-fullscreen-button:visited {
+  background: #eef7fb;
+  border-color: #8ab8cd;
+  color: #1f5d78;
+  font-weight: 700;
+}
+
+.datasette-app-fullscreen-button:hover,
+.datasette-app-fullscreen-button:focus,
+.datasette-app-fullscreen-button:active {
+  background: #e2f1f7;
+  border-color: #276890;
+  color: #174b63;
 }
 
 .datasette-app-danger-zone {

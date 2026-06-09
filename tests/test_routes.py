@@ -68,6 +68,17 @@ async def test_create_view_and_edit_stored_app():
     assert "window.datasette" in view.text
     assert "datasette.request" not in view.text
     assert "Hello" in view.text
+    assert f'href="/-/apps/{app_id}?full=1"' in view.text
+
+    full = await datasette.client.get(f"{location}?full=1", actor={"id": "alice"})
+    assert full.status_code == 200
+    assert "<h1>Hello app</h1>" not in full.text
+    assert 'href="/-/apps"' not in full.text
+    assert '<iframe\n  id="datasette-app-frame"' in full.text
+    assert 'class="datasette-app-frame datasette-app-frame-full"' in full.text
+    assert "height: 100vh;" in full.text
+    assert "width: 100vw;" in full.text
+    assert "Hello" in full.text
 
     edit_form = await datasette.client.get(
         f"/-/apps/{app_id}/edit", actor={"id": "alice"}
@@ -80,7 +91,7 @@ async def test_create_view_and_edit_stored_app():
     assert "cm.editorFromTextArea" in edit_form.text
 
     state = await Registry(datasette).get_user_state("alice", app_id)
-    assert state["access_count"] == 1
+    assert state["access_count"] == 2
 
     edit = await datasette.client.post(
         f"/-/apps/{app_id}/edit",

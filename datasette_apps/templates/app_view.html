@@ -10,31 +10,29 @@
 {% block content %}
 <div class="datasette-app-view-header">
   <h1>{{ app.name }}</h1>
-  <div class="datasette-app-actions">
-    <a class="datasette-app-button" href="{{ urls.path('/-/apps') }}">All apps</a>
-    {% if can_edit %}
-    <a class="datasette-app-button" href="{{ urls.path('/-/apps/' ~ app.id ~ '/edit') }}">Edit app</a>
-    {% endif %}
-    {% if can_pin %}
-      <form class="datasette-app-pin-form" method="post" action="{{ urls.path('/-/apps/' ~ app.id ~ '/' ~ ('unpin' if pinned else 'pin')) }}">
-        <input type="hidden" name="next" value="{{ current_path }}">
-        <button
-          class="datasette-app-button datasette-app-pin-button"
-          type="submit"
-          aria-pressed="{% if pinned %}true{% else %}false{% endif %}"
-          aria-label="{% if pinned %}Unpin{% else %}Pin{% endif %} {{ app.name }}"
-        >{% if pinned %}Unpin{% else %}Pin{% endif %}</button>
-      </form>
-    {% endif %}
+  <div class="datasette-app-action-stack">
+    <div class="datasette-app-actions">
+      <a class="datasette-app-button" href="{{ urls.path('/-/apps') }}">All apps</a>
+      {% if can_edit %}
+      <a class="datasette-app-button" href="{{ urls.path('/-/apps/' ~ app.id ~ '/edit') }}">Edit app</a>
+      {% endif %}
+      {% if can_pin %}
+        <form class="datasette-app-pin-form" method="post" action="{{ urls.path('/-/apps/' ~ app.id ~ '/' ~ ('unpin' if pinned else 'pin')) }}">
+          <input type="hidden" name="next" value="{{ current_path }}">
+          <button
+            class="datasette-app-button datasette-app-pin-button"
+            type="submit"
+            aria-pressed="{% if pinned %}true{% else %}false{% endif %}"
+            aria-label="{% if pinned %}Unpin{% else %}Pin{% endif %} {{ app.name }}"
+          >{% if pinned %}Unpin{% else %}Pin{% endif %}</button>
+        </form>
+      {% endif %}
+    </div>
+    <div class="datasette-app-secondary-actions">
+      <a class="datasette-app-button datasette-app-fullscreen-button" href="{{ urls.path('/-/apps/' ~ app.id) }}?full=1">Full screen</a>
+    </div>
   </div>
 </div>
 
-{{ parent_bridge|safe }}
-<iframe
-  id="datasette-app-frame"
-  sandbox="allow-scripts allow-forms"
-  csp="{{ csp }}"
-  srcdoc="{{ srcdoc }}"
-  style="width: 100%; min-height: 70vh; border: 1px solid #ccc;"
-></iframe>
+{% include "_app_frame.html" %}
 {% endblock %}

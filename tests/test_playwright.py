@@ -644,31 +644,39 @@ def test_iframe_logs_render_below_iframe_in_collapsed_parent_log_panel(tmp_path)
         panel.wait_for()
         assert panel.evaluate("element => element.open") is False
         assert page.locator(".datasette-app-log-count").inner_text() == "2 log entries"
-        assert page.locator(
-            ".datasette-app-log-kind", has_text="console-log"
-        ).count() == 1
-        assert page.locator(
-            ".datasette-app-log-message",
-            has_text='Playwright saw this app log {"answer":42}',
-        ).count() == 1
-        assert page.locator(
-            ".datasette-app-log-message",
-            has_text="datasette.query(content, select name from items",
-        ).count() == 1
-        assert page.locator(
-            ".datasette-app-log-details", has_text="Method: query"
-        ).count() == 1
-        assert page.locator(
-            ".datasette-app-log-details", has_text='Params: {"score":2}'
-        ).count() == 1
-        assert page.evaluate(
-            """() => {
+        assert (
+            page.locator(".datasette-app-log-kind", has_text="console-log").count() == 1
+        )
+        assert (
+            page.locator(
+                ".datasette-app-log-message",
+                has_text='Playwright saw this app log {"answer":42}',
+            ).count()
+            == 1
+        )
+        assert (
+            page.locator(
+                ".datasette-app-log-message",
+                has_text="datasette.query(content, select name from items",
+            ).count()
+            == 1
+        )
+        assert (
+            page.locator(".datasette-app-log-details", has_text="Method: query").count()
+            == 1
+        )
+        assert (
+            page.locator(
+                ".datasette-app-log-details", has_text='Params: {"score":2}'
+            ).count()
+            == 1
+        )
+        assert page.evaluate("""() => {
               const iframe = document.getElementById("datasette-app-frame");
               const panel = document.querySelector(".datasette-app-log-panel");
               return !!(iframe.compareDocumentPosition(panel) &
                 Node.DOCUMENT_POSITION_FOLLOWING);
-            }"""
-        )
+            }""")
 
 
 def test_iframe_link_click_shows_parent_confirmation_modal(tmp_path):

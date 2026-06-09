@@ -1,0 +1,8 @@
+{{ parent_bridge|safe }}
+<iframe
+  id="datasette-app-frame"
+  class="datasette-app-frame{% if app_frame_full %} datasette-app-frame-full{% endif %}"
+  sandbox="allow-scripts allow-forms"
+  csp="{{ csp }}"
+  srcdoc="{{ srcdoc }}"
+></iframe>
