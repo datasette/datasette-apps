@@ -29,6 +29,7 @@
   </div>
 </div>
 
+{{ parent_bridge|safe }}
 <iframe
   id="datasette-app-frame"
   sandbox="allow-scripts allow-forms"
@@ -36,5 +37,4 @@
   srcdoc="{{ srcdoc }}"
   style="width: 100%; min-height: 70vh; border: 1px solid #ccc;"
 ></iframe>
-{{ parent_bridge|safe }}
 {% endblock %}

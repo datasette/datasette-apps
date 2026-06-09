@@ -179,9 +179,7 @@ class LeakServer:
 @contextmanager
 def _browser_page(*, args=None, ignore_https_errors=False):
     with sync_playwright() as playwright:
-        browser_name = os.environ.get(
-            "DATASETTE_APPS_PLAYWRIGHT_BROWSER", "chromium"
-        )
+        browser_name = os.environ.get("DATASETTE_APPS_PLAYWRIGHT_BROWSER", "chromium")
         launch_kwargs = {"args": args or []}
         if browser_name == "chrome":
             browser_type = playwright.chromium
@@ -497,6 +495,88 @@ def test_datasette_query_bridge_returns_data_to_iframe(tmp_path):
         assert iframe.locator("#result").inner_text() == (
             '[{"name":"beta","score":5},{"name":"alpha","score":2}]'
         )
+
+
+def test_replaced_iframe_document_cannot_use_global_query_messages(tmp_path):
+    # This is a defense-in-depth regression for the old global postMessage()
+    # bridge. If the iframe document is replaced after the real app loads, the
+    # replacement document still has the same iframe contentWindow. The old
+    # parent bridge trusted that window identity alone, so this fake document
+    # could ask the parent to run app-scoped SQL.
+    content_db_path = tmp_path / "content.db"
+    _create_content_database(content_db_path)
+    server = DatasetteServer(tmp_path, files=[content_db_path])
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<p id="ready">original app</p>
+<script>
+datasette.query("content", "select 1 as ok");
+</script>""",
+            name="Replaced iframe bridge",
+            sql_databases=["content"],
+        )
+    )
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app))
+        _iframe(page).locator("#ready").wait_for()
+
+        # Replace the iframe with a document that did not receive the private
+        # MessagePort from the injected Datasette bridge. It then tries to use
+        # the old global postMessage() query protocol directly.
+        attack_result = page.evaluate("""
+        () => new Promise((resolve) => {
+          const iframe = document.getElementById("datasette-app-frame");
+          let done = false;
+          function finish(value) {
+            if (done) {
+              return;
+            }
+            done = true;
+            window.removeEventListener("message", onMessage);
+            resolve(value);
+          }
+          function onMessage(event) {
+            if (event.data && event.data.type === "attack-result") {
+              finish(event.data);
+            }
+          }
+          window.addEventListener("message", onMessage);
+          iframe.srcdoc = `
+            <!doctype html>
+            <p>replacement document</p>
+            <script>
+            // If the parent still accepts privileged global postMessage()
+            // requests from iframe.contentWindow, this listener will see a
+            // query response and forward it to the test harness.
+            window.addEventListener("message", function(event) {
+              if (event.data && event.data.type === "datasette-app-response") {
+                parent.postMessage({
+                  type: "attack-result",
+                  response: event.data
+                }, "*");
+              }
+            });
+            // This mimics the pre-MessageChannel bridge protocol without using
+            // window.datasette. The secure parent should ignore it completely.
+            parent.postMessage({
+              type: "datasette-app-query",
+              id: 4242,
+              input: {
+                database: "content",
+                sql: "select name, score from items order by score desc"
+              }
+            }, "*");
+            <\\/script>
+          `;
+          setTimeout(() => finish({status: "no-response-from-parent"}), 500);
+        })
+        """)
+
+        # Secure behavior: the replacement document cannot get a response,
+        # because it never received the MessagePort capability.
+        assert attack_result == {"status": "no-response-from-parent"}
 
 
 def test_iframe_errors_render_in_parent_error_panel(tmp_path):
