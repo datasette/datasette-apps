@@ -109,6 +109,61 @@
   white-space: pre-wrap;
 }
 
+.datasette-app-log-panel {
+  background: #f7f9fb;
+  border: 1px solid #c9d3df;
+  border-radius: 4px;
+  color: #1f2933;
+  margin: 0.75rem 0 0;
+  padding: 0.55rem 0.7rem;
+}
+
+.datasette-app-log-panel[hidden] {
+  display: none;
+}
+
+.datasette-app-log-panel summary {
+  color: #23445f;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.datasette-app-log-list {
+  margin: 0.75rem 0 0 1.25rem;
+  padding: 0;
+}
+
+.datasette-app-log-list li {
+  margin: 0 0 0.8rem;
+}
+
+.datasette-app-log-kind {
+  display: block;
+}
+
+.datasette-app-log-message {
+  margin: 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+
+.datasette-app-log-time {
+  color: rgba(31, 41, 51, 0.68);
+  display: block;
+  font-size: 0.85rem;
+  margin: 0 0 0.3rem;
+}
+
+.datasette-app-log-details {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(201, 211, 223, 0.85);
+  border-radius: 3px;
+  font-size: 0.85rem;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.45rem;
+  white-space: pre-wrap;
+}
+
 .datasette-app-link-modal {
   align-items: center;
   background: rgba(0, 0, 0, 0.42);
