@@ -101,7 +101,9 @@ def test_iframe_bridge_reports_app_errors_to_parent():
     assert "securitypolicyviolation" in script
     assert "unhandledrejection" in script
     assert "console.error" in script
+    assert "console.log" in script
     assert "window.fetch" in script
+    assert 'type: "datasette-app-log"' in script
 
 
 def test_iframe_bridge_intercepts_external_link_clicks():
@@ -131,6 +133,16 @@ def test_parent_bridge_renders_app_error_panel():
     assert "datasette-app-error-list" in script
     assert 'message.type === "datasette-app-error"' in script
     assert "errors.slice(-50)" in script
+
+
+def test_parent_bridge_renders_app_log_panel():
+    script = parent_bridge_script("app1")
+
+    assert "datasette-app-log-panel" in script
+    assert "datasette-app-log-list" in script
+    assert 'message.type === "datasette-app-log"' in script
+    assert "logs.slice(-100)" in script
+    assert "iframe.nextSibling" in script
 
 
 def test_parent_bridge_renders_external_link_modal():

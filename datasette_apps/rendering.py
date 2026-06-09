@@ -103,6 +103,33 @@ def iframe_bridge_script(channel_token=None):
     });
   }
 
+  function postAppLog(kind, details) {
+    details = details || {};
+    details.kind = kind;
+    details.timestamp = new Date().toISOString();
+    postToParent({
+      type: "datasette-app-log",
+      log: details
+    });
+  }
+
+  function describeDatasetteCall(method, input) {
+    var parts = [];
+    if (input.database !== undefined) {
+      parts.push(valueToString(input.database));
+    }
+    if (input.sql !== undefined) {
+      parts.push(valueToString(input.sql));
+    }
+    if (input.query !== undefined) {
+      parts.push(valueToString(input.query));
+    }
+    if (input.params && Object.keys(input.params).length) {
+      parts.push(valueToString(input.params));
+    }
+    return "datasette." + method + "(" + parts.join(", ") + ")";
+  }
+
   function externalLinkUrl(anchor) {
     if (!anchor || !anchor.href || anchor.hasAttribute("download")) {
       return "";
@@ -209,6 +236,18 @@ def iframe_bridge_script(channel_token=None):
     };
   }
 
+  if (window.console && typeof window.console.log === "function") {
+    var originalConsoleLog = window.console.log;
+    window.console.log = function() {
+      var parts = Array.prototype.slice.call(arguments).map(valueToString);
+      postAppLog("console-log", {
+        message: parts.join(" "),
+        arguments: parts
+      });
+      return originalConsoleLog.apply(window.console, arguments);
+    };
+  }
+
   if (typeof window.fetch === "function") {
     var originalFetch = window.fetch.bind(window);
     window.fetch = function(input, init) {
@@ -270,38 +309,50 @@ def iframe_bridge_script(channel_token=None):
     bridgePort = null;
   }
 
-  window.datasette = {
-    query: function(database, sql, params) {
-      var id = nextId++;
-      return new Promise(function(resolve, reject) {
-        pending.set(id, {
-          resolve: resolve,
-          reject: reject,
-          errorKind: "datasette-query-error"
-        });
-        postToParent({
-          type: "datasette-app-query",
-          id: id,
-          input: {database: database, sql: sql, params: params || {}}
-        });
+  function requestDatasette(method, messageType, input, errorKind) {
+    var id = nextId++;
+    input.params = input.params || {};
+    postAppLog("datasette-call", {
+      message: describeDatasetteCall(method, input),
+      method: method,
+      database: valueToString(input.database),
+      sql: input.sql === undefined ? "" : valueToString(input.sql),
+      query: input.query === undefined ? "" : valueToString(input.query),
+      params: valueToString(input.params)
+    });
+    return new Promise(function(resolve, reject) {
+      pending.set(id, {
+        resolve: resolve,
+        reject: reject,
+        errorKind: errorKind
       });
+      postToParent({
+        type: messageType,
+        id: id,
+        input: input
+      });
+    });
+  }
+
+  var datasetteApi = {
+    query: function(database, sql, params) {
+      return requestDatasette(
+        "query",
+        "datasette-app-query",
+        {database: database, sql: sql, params: params},
+        "datasette-query-error"
+      );
     },
     storedQuery: function(database, query, params) {
-      var id = nextId++;
-      return new Promise(function(resolve, reject) {
-        pending.set(id, {
-          resolve: resolve,
-          reject: reject,
-          errorKind: "datasette-stored-query-error"
-        });
-        postToParent({
-          type: "datasette-app-stored-query",
-          id: id,
-          input: {database: database, query: query, params: params || {}}
-        });
-      });
+      return requestDatasette(
+        "storedQuery",
+        "datasette-app-stored-query",
+        {database: database, query: query, params: params},
+        "datasette-stored-query-error"
+      );
     }
   };
+  window.datasette = datasetteApi;
 
   try {
     // Cosmetic only: drop this <script> node now that the IIFE has run so the
@@ -332,6 +383,10 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=
   var errorPanel = null;
   var errorCount = null;
   var errorList = null;
+  var logs = [];
+  var logPanel = null;
+  var logCount = null;
+  var logList = null;
   var linkModal = null;
   var linkDialog = null;
   var linkUrl = null;
@@ -373,6 +428,28 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=
     var iframe = getIframe();
     if (iframe && iframe.parentNode) {
       iframe.parentNode.insertBefore(errorPanel, iframe);
+    }
+  }
+
+  function ensureLogPanel() {
+    if (logPanel) {
+      return;
+    }
+    logPanel = document.createElement("details");
+    logPanel.className = "datasette-app-log-panel";
+    logPanel.hidden = true;
+
+    var summary = document.createElement("summary");
+    logCount = appendText(summary, "span", "datasette-app-log-count", "0 log entries");
+    logPanel.appendChild(summary);
+
+    logList = document.createElement("ol");
+    logList.className = "datasette-app-log-list";
+    logPanel.appendChild(logList);
+
+    var iframe = getIframe();
+    if (iframe && iframe.parentNode) {
+      iframe.parentNode.insertBefore(logPanel, iframe.nextSibling);
     }
   }
 
@@ -429,10 +506,61 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=
     });
   }
 
+  function logDetailsText(log) {
+    var parts = [];
+    if (log.method) {
+      parts.push("Method: " + log.method);
+    }
+    if (log.database) {
+      parts.push("Database: " + log.database);
+    }
+    if (log.sql) {
+      parts.push("SQL: " + log.sql);
+    }
+    if (log.query) {
+      parts.push("Query: " + log.query);
+    }
+    if (log.params && log.params !== "{}") {
+      parts.push("Params: " + log.params);
+    }
+    if (log.arguments && log.arguments.length) {
+      parts.push("Arguments: " + log.arguments.join("\\n"));
+    }
+    return parts.join("\\n");
+  }
+
+  function renderLogs() {
+    ensureLogPanel();
+    logPanel.hidden = logs.length === 0;
+    logCount.textContent = logs.length + (
+      logs.length === 1 ? " log entry" : " log entries"
+    );
+    logList.textContent = "";
+    logs.slice().reverse().forEach(function(log) {
+      var item = document.createElement("li");
+      appendText(item, "strong", "datasette-app-log-kind", log.kind || "log");
+      appendText(item, "div", "datasette-app-log-message", log.message || "");
+      if (log.timestamp) {
+        appendText(item, "time", "datasette-app-log-time", log.timestamp);
+      }
+      var details = logDetailsText(log);
+      if (details) {
+        appendText(item, "pre", "datasette-app-log-details", details);
+      }
+      logList.appendChild(item);
+    });
+  }
+
   function addAppError(error) {
     errors.push(error || {});
     errors = errors.slice(-50);
     renderErrors();
+  }
+
+  function addAppLog(log) {
+    logs.push(log || {});
+    logs = logs.slice(-100);
+    renderLogs();
   }
 
   function normalizedExternalUrl(value) {
@@ -555,6 +683,10 @@ def parent_bridge_script(app_id, iframe_id="datasette-app-frame", channel_token=
     }
     if (message.type === "datasette-app-error") {
       addAppError(message.error || {});
+      return;
+    }
+    if (message.type === "datasette-app-log") {
+      addAppLog(message.log || {});
       return;
     }
     if (
