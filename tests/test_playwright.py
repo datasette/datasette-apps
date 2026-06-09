@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import sqlite3
 import subprocess
@@ -178,7 +179,22 @@ class LeakServer:
 @contextmanager
 def _browser_page(*, args=None, ignore_https_errors=False):
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(args=args or [])
+        browser_name = os.environ.get(
+            "DATASETTE_APPS_PLAYWRIGHT_BROWSER", "chromium"
+        )
+        launch_kwargs = {"args": args or []}
+        if browser_name == "chrome":
+            browser_type = playwright.chromium
+            launch_kwargs["channel"] = "chrome"
+        else:
+            try:
+                browser_type = getattr(playwright, browser_name)
+            except AttributeError as ex:
+                raise AssertionError(
+                    "DATASETTE_APPS_PLAYWRIGHT_BROWSER must be one of "
+                    "chromium, chrome, firefox, or webkit"
+                ) from ex
+        browser = browser_type.launch(**launch_kwargs)
         try:
             page = browser.new_page(ignore_https_errors=ignore_https_errors)
             yield page

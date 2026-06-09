@@ -1,0 +1,50 @@
+name: Test Playwright
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test-playwright:
+    name: ${{ matrix.browser }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - browser: chrome
+          os: ubuntu-latest
+          install-command: python -m playwright install --with-deps chrome
+        - browser: firefox
+          os: ubuntu-latest
+          install-command: python -m playwright install --with-deps firefox
+        - browser: webkit
+          os: macos-latest
+          install-command: python -m playwright install webkit
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+        cache: pip
+        cache-dependency-path: pyproject.toml
+    - name: Install dependencies
+      run: |
+        pip install . --group dev
+    - name: Cache Playwright browsers
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/ms-playwright/
+          ~/Library/Caches/ms-playwright/
+        key: ${{ runner.os }}-browsers-${{ matrix.browser }}-${{ hashFiles('uv.lock') }}
+    - name: Install Playwright browser
+      run: |
+        ${{ matrix.install-command }}
+    - name: Run Playwright tests
+      env:
+        DATASETTE_APPS_PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+      run: |
+        python -m pytest tests/test_playwright.py
