@@ -38,12 +38,15 @@
 
   function networkOrigins() {
     var input = document.getElementById("app-csp-origins");
-    if (!input) {
-      return [];
+    if (input) {
+      return input.value.split(/\r?\n/).map(function(origin) {
+        return origin.trim();
+      }).filter(Boolean);
     }
-    return input.value.split(/\r?\n/).map(function(origin) {
-      return origin.trim();
-    }).filter(Boolean);
+    return Array.prototype.map.call(
+      document.querySelectorAll("input[type='checkbox'][name='csp_origins']:checked"),
+      function(checkbox) { return checkbox.value; }
+    );
   }
 
   function selectedStoredQueries() {

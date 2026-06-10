@@ -54,6 +54,11 @@ def register_app_actions():
             description="Manage Datasette app access",
             resource_class=AppResource,
         ),
+        Action(
+            name="apps-set-csp",
+            description="Set arbitrary CSP origins on Datasette apps",
+            resource_class=AppsResource,
+        ),
     ]
 
 

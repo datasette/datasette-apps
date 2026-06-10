@@ -5,6 +5,7 @@ import json
 
 from datasette_agent_edit import EditError, EditToolset, Editable, NotFound
 
+from .csp import configured_csp_allowlist, resolve_csp_origins
 from .permissions import AppResource, AppsResource
 from .registry import Registry
 
@@ -198,6 +199,7 @@ async def _app_create(
     if not await _can_create_app(datasette, actor):
         return _error("Permission denied: create-app")
     try:
+        csp_origins = await resolve_csp_origins(datasette, actor, csp_origins or [])
         app = await Registry(datasette).create_stored_app(
             actor_id=_actor_id(actor),
             name=name or "Untitled app",
@@ -234,7 +236,30 @@ async def _with_app_edit_permission(datasette, actor, app_id, callback):
     return await callback()
 
 
-def get_app_edit_tools(AgentTool):
+def _csp_origins_schema_description(datasette=None):
+    description = (
+        "Optional exact https:// origins this app may contact "
+        "for scripts, styles, images, and fetch requests"
+    )
+    if datasette is None:
+        return description
+    # The schema is built once at registration time, not per-actor, so this
+    # describes the rules for users without the apps-set-csp permission.
+    allowlist = configured_csp_allowlist(datasette)
+    if allowlist:
+        return description + (
+            ". Origins must come from this allow-list: {} "
+            "(the apps-set-csp permission lifts this restriction)".format(
+                ", ".join(allowlist)
+            )
+        )
+    return description + (
+        ". Requires the apps-set-csp permission; no origin allow-list is "
+        "configured, so users without that permission cannot set origins"
+    )
+
+
+def get_app_edit_tools(AgentTool, datasette=None):
     async def app_view(datasette, actor, app_id, view_range=""):
         return await _with_app_edit_permission(
             datasette,
@@ -316,10 +341,7 @@ def get_app_edit_tools(AgentTool):
                     },
                     "csp_origins": {
                         "type": "array",
-                        "description": (
-                            "Optional exact https:// origins this app may contact "
-                            "for scripts, styles, images, and fetch requests"
-                        ),
+                        "description": _csp_origins_schema_description(datasette),
                         "items": {"type": "string"},
                     },
                 },

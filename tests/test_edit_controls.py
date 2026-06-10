@@ -24,7 +24,10 @@ def create_table_preview_database(tmp_path):
 
 @pytest.mark.asyncio
 async def test_create_form_shows_access_data_and_network_controls():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+    )
 
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
 
@@ -78,7 +81,12 @@ async def test_create_form_shows_access_data_and_network_controls():
 async def test_create_form_saves_access_data_and_network_controls():
     datasette = Datasette(
         memory=True,
-        config={"permissions": {"view-app": {"id": "*"}}},
+        config={
+            "permissions": {
+                "view-app": {"id": "*"},
+                "apps-set-csp": {"id": "alice"},
+            }
+        },
     )
     registry = Registry(datasette)
 
@@ -110,7 +118,10 @@ async def test_create_form_saves_access_data_and_network_controls():
 
 @pytest.mark.asyncio
 async def test_edit_form_shows_access_data_network_and_capability_controls():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+    )
     app = await Registry(datasette).create_stored_app(
         actor_id="alice",
         name="Controlled app",
@@ -185,7 +196,10 @@ async def test_create_form_shows_database_link_and_table_preview(tmp_path):
 
 @pytest.mark.asyncio
 async def test_edit_form_saves_sql_database_and_csp():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+    )
     await datasette.invoke_startup()
     await datasette.add_query(
         "_memory",
@@ -284,3 +298,260 @@ async def test_edit_form_not_private_access_mode_allows_actor_with_view_app():
 
     response = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "bob"})
     assert response.status_code == 200
+
+
+CSP_ALLOWLIST_CONFIG = {
+    "plugins": {
+        "datasette-apps": {"allowed_csp_origins": ["https://cdn.jsdelivr.net"]}
+    }
+}
+
+
+@pytest.mark.asyncio
+async def test_create_form_hides_network_access_without_permission_or_allowlist():
+    datasette = Datasette(memory=True)
+
+    response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
+
+    assert response.status_code == 200
+    assert "Network access" not in response.text
+    assert 'name="csp_origins"' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_create_form_shows_allowlist_checkboxes_without_permission():
+    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+
+    response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
+
+    assert response.status_code == 200
+    assert "Network access" in response.text
+    assert 'name="csp_origins_present"' in response.text
+    assert (
+        'type="checkbox" name="csp_origins" value="https://cdn.jsdelivr.net"'
+        in response.text
+    )
+    assert 'id="app-csp-origins"' not in response.text
+    assert "administrator-approved" in response.text
+
+
+@pytest.mark.asyncio
+async def test_create_form_shows_textarea_with_apps_set_csp_permission():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+    )
+
+    response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
+
+    assert response.status_code == 200
+    assert 'textarea id="app-csp-origins" name="csp_origins"' in response.text
+    assert "Enter exact https:// origins" in response.text
+
+
+@pytest.mark.asyncio
+async def test_create_post_rejects_origin_not_on_allowlist():
+    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+
+    response = await datasette.client.post(
+        "/-/apps/create",
+        actor={"id": "alice"},
+        data={
+            "name": "Sneaky app",
+            "description": "",
+            "html": "<h1>Hi</h1>",
+            "csp_origins": "https://attacker.example.com",
+        },
+    )
+
+    assert response.status_code == 403
+    assert "https://attacker.example.com" in response.text
+
+
+@pytest.mark.asyncio
+async def test_create_post_accepts_allowlisted_origin():
+    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+    registry = Registry(datasette)
+
+    response = await datasette.client.post(
+        "/-/apps/create",
+        actor={"id": "alice"},
+        data={
+            "name": "CDN app",
+            "description": "",
+            "html": "<h1>Hi</h1>",
+            "csp_origins_present": "1",
+            "csp_origins": "https://cdn.jsdelivr.net",
+        },
+    )
+
+    assert response.status_code == 302
+    app_id = response.headers["location"].rsplit("/", 1)[-1]
+    assert await registry.get_csp_origins(app_id) == ["https://cdn.jsdelivr.net"]
+
+
+@pytest.mark.asyncio
+async def test_create_post_rejects_arbitrary_origin_without_allowlist():
+    datasette = Datasette(memory=True)
+
+    response = await datasette.client.post(
+        "/-/apps/create",
+        actor={"id": "alice"},
+        data={
+            "name": "Sneaky app",
+            "description": "",
+            "html": "<h1>Hi</h1>",
+            "csp_origins": "https://attacker.example.com",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_edit_form_shows_existing_out_of_list_origin_as_checkbox():
+    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Existing app",
+        description="",
+        html="",
+        csp_origins=["https://api.github.com"],
+    )
+
+    response = await datasette.client.get(
+        f"/-/apps/{app['id']}/edit", actor={"id": "alice"}
+    )
+
+    assert response.status_code == 200
+    assert 'id="app-csp-origins"' not in response.text
+    assert (
+        'type="checkbox" name="csp_origins" value="https://api.github.com" checked'
+        in response.text
+    )
+    assert (
+        'type="checkbox" name="csp_origins" value="https://cdn.jsdelivr.net"'
+        in response.text
+    )
+    assert (
+        'value="https://cdn.jsdelivr.net" checked'
+        not in response.text
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_post_preserves_existing_out_of_list_origin():
+    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Existing app",
+        description="",
+        html="",
+        csp_origins=["https://api.github.com"],
+    )
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/edit",
+        actor={"id": "alice"},
+        data={
+            "name": "Existing app",
+            "description": "",
+            "html": "",
+            "csp_origins_present": "1",
+            "csp_origins": ["https://api.github.com", "https://cdn.jsdelivr.net"],
+        },
+    )
+
+    assert response.status_code == 302
+    assert await registry.get_csp_origins(app["id"]) == [
+        "https://api.github.com",
+        "https://cdn.jsdelivr.net",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_edit_post_can_remove_existing_origin():
+    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Existing app",
+        description="",
+        html="",
+        csp_origins=["https://api.github.com"],
+    )
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/edit",
+        actor={"id": "alice"},
+        data={
+            "name": "Existing app",
+            "description": "",
+            "html": "",
+            "csp_origins_present": "1",
+        },
+    )
+
+    assert response.status_code == 302
+    assert await registry.get_csp_origins(app["id"]) == []
+
+
+@pytest.mark.asyncio
+async def test_edit_post_rejects_new_arbitrary_origin_without_permission():
+    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Existing app",
+        description="",
+        html="",
+        csp_origins=["https://api.github.com"],
+    )
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/edit",
+        actor={"id": "alice"},
+        data={
+            "name": "Existing app",
+            "description": "",
+            "html": "",
+            "csp_origins_present": "1",
+            "csp_origins": [
+                "https://api.github.com",
+                "https://attacker.example.com",
+            ],
+        },
+    )
+
+    assert response.status_code == 403
+    assert await registry.get_csp_origins(app["id"]) == ["https://api.github.com"]
+
+
+@pytest.mark.asyncio
+async def test_edit_post_allows_arbitrary_origin_with_permission():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+    )
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Existing app",
+        description="",
+        html="",
+    )
+
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/edit",
+        actor={"id": "alice"},
+        data={
+            "name": "Existing app",
+            "description": "",
+            "html": "",
+            "csp_origins": "https://api.github.com\n",
+        },
+    )
+
+    assert response.status_code == 302
+    assert await registry.get_csp_origins(app["id"]) == ["https://api.github.com"]

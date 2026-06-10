@@ -278,3 +278,100 @@ async def test_app_agent_tool_rendered_links_respect_base_url():
     )
     assert f'href="/prefix/-/apps/{app["id"]}"' in edited["_html"]
     assert f'href="/prefix/-/apps/{app["id"]}/edit"' in edited["_html"]
+
+
+@pytest.mark.asyncio
+async def test_app_create_agent_tool_rejects_disallowed_csp_origin():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+    tools = _tools_by_name()
+
+    result = json.loads(
+        await tools["app_create"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+            name="Sneaky app",
+            html="<h1>Hi</h1>",
+            csp_origins=["https://attacker.example.com"],
+        )
+    )
+    assert "https://attacker.example.com" in result["error"]
+    assert "apps-set-csp" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_app_create_agent_tool_allows_allowlisted_csp_origin():
+    datasette = Datasette(
+        memory=True,
+        config={
+            "plugins": {
+                "datasette-apps": {"allowed_csp_origins": ["cdn.jsdelivr.net"]}
+            }
+        },
+    )
+    await datasette.invoke_startup()
+    tools = _tools_by_name()
+
+    result = json.loads(
+        await tools["app_create"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+            name="CDN app",
+            html="<h1>Hi</h1>",
+            csp_origins=["https://cdn.jsdelivr.net"],
+        )
+    )
+    assert "error" not in result
+    assert await Registry(datasette).get_csp_origins(result["app_id"]) == [
+        "https://cdn.jsdelivr.net"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_app_create_agent_tool_allows_any_origin_with_permission():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+    )
+    await datasette.invoke_startup()
+    tools = _tools_by_name()
+
+    result = json.loads(
+        await tools["app_create"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+            name="Privileged app",
+            html="<h1>Hi</h1>",
+            csp_origins=["https://api.github.com"],
+        )
+    )
+    assert "error" not in result
+    assert await Registry(datasette).get_csp_origins(result["app_id"]) == [
+        "https://api.github.com"
+    ]
+
+
+def test_app_create_schema_mentions_allowlist_when_configured():
+    datasette = Datasette(
+        memory=True,
+        config={
+            "plugins": {
+                "datasette-apps": {"allowed_csp_origins": ["cdn.jsdelivr.net"]}
+            }
+        },
+    )
+    tools = {tool.name: tool for tool in get_app_edit_tools(FakeAgentTool, datasette)}
+    description = tools["app_create"].input_schema["properties"]["csp_origins"][
+        "description"
+    ]
+    assert "https://cdn.jsdelivr.net" in description
+    assert "apps-set-csp" in description
+
+
+def test_app_create_schema_mentions_permission_when_no_allowlist():
+    datasette = Datasette(memory=True)
+    tools = {tool.name: tool for tool in get_app_edit_tools(FakeAgentTool, datasette)}
+    description = tools["app_create"].input_schema["properties"]["csp_origins"][
+        "description"
+    ]
+    assert "apps-set-csp" in description

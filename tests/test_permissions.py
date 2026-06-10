@@ -254,3 +254,35 @@ async def test_shared_app_only_shows_edit_button_to_owner():
     assert f'href="/-/apps/{app["id"]}/edit"' in owner.text
     assert f'href="/-/apps/{app["id"]}/edit"' not in viewer.text
     assert "Edit app" not in viewer.text
+
+
+@pytest.mark.asyncio
+async def test_apps_set_csp_is_denied_by_default():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+
+    assert not await datasette.allowed(
+        action="apps-set-csp",
+        resource=AppsResource(),
+        actor={"id": "alice"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_apps_set_csp_can_be_granted_via_config():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"apps-set-csp": {"id": "admin"}}},
+    )
+    await datasette.invoke_startup()
+
+    assert await datasette.allowed(
+        action="apps-set-csp",
+        resource=AppsResource(),
+        actor={"id": "admin"},
+    )
+    assert not await datasette.allowed(
+        action="apps-set-csp",
+        resource=AppsResource(),
+        actor={"id": "alice"},
+    )

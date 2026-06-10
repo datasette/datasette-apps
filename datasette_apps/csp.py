@@ -59,6 +59,48 @@ def normalize_connect_origin(origin):
     return f"{parsed.scheme}://{netloc}"
 
 
+class CspOriginNotAllowed(ValueError):
+    pass
+
+
+def normalize_allowlist_origin(origin):
+    origin = (origin or "").strip()
+    if "://" not in origin:
+        origin = f"https://{origin}"
+    return normalize_connect_origin(origin)
+
+
+def configured_csp_allowlist(datasette):
+    plugin_config = datasette.plugin_config("datasette-apps") or {}
+    origins = plugin_config.get("allowed_csp_origins") or []
+    return sorted({normalize_allowlist_origin(origin) for origin in origins})
+
+
+async def resolve_csp_origins(datasette, actor, requested_origins, existing_origins=()):
+    from .permissions import AppsResource
+
+    normalized = []
+    for origin in requested_origins:
+        origin = normalize_connect_origin(origin)
+        if origin not in normalized:
+            normalized.append(origin)
+    if not normalized:
+        return normalized
+    if await datasette.allowed(
+        action="apps-set-csp", resource=AppsResource(), actor=actor
+    ):
+        return normalized
+    permitted = set(configured_csp_allowlist(datasette)) | set(existing_origins)
+    disallowed = [origin for origin in normalized if origin not in permitted]
+    if disallowed:
+        raise CspOriginNotAllowed(
+            "Not allowed to set CSP origins: {}. These origins are not on the "
+            "configured allow-list; the apps-set-csp permission is required to "
+            "set arbitrary origins.".format(", ".join(disallowed))
+        )
+    return normalized
+
+
 def build_csp(connect_origins):
     origins = [normalize_connect_origin(origin) for origin in connect_origins]
     directives = [*BASE_DIRECTIVES]

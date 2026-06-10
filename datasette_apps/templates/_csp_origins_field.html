@@ -1,0 +1,34 @@
+{% macro field(show_csp_section, can_set_csp, csp_origin_options, csp_origins="") %}
+{% if show_csp_section %}
+<h2>Network access</h2>
+<div class="datasette-app-form-row">
+  {% if can_set_csp %}
+    <label for="app-csp-origins">Allowed network and asset origins</label>
+    <p class="datasette-app-form-warning">
+      Be cautious: any site listed here could receive private data from this app.
+    </p>
+    <textarea id="app-csp-origins" name="csp_origins" rows="4" placeholder="https://cdn.jsdelivr.net">{{ csp_origins }}</textarea>
+    <p class="datasette-app-form-help">
+      Enter exact https:// origins, one per line. Do not include paths, query strings, wildcards, or localhost. These origins can be used for fetch(), images, scripts, and styles.
+    </p>
+  {% else %}
+    <input type="hidden" name="csp_origins_present" value="1">
+    <label>Allowed network and asset origins</label>
+    <p class="datasette-app-form-warning">
+      Be cautious: any site listed here could receive private data from this app.
+    </p>
+    <fieldset class="datasette-app-checkbox-list">
+      {% for option in csp_origin_options %}
+        <label class="datasette-app-database-option">
+          <input type="checkbox" name="csp_origins" value="{{ option.origin }}" {% if option.checked %}checked{% endif %}>
+          <span class="datasette-app-database-option-text">{{ option.origin }}</span>
+        </label>
+      {% endfor %}
+    </fieldset>
+    <p class="datasette-app-form-help">
+      Pick from these administrator-approved origins. They can be used for fetch(), images, scripts, and styles.
+    </p>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}

@@ -1,6 +1,7 @@
 from datasette import hookimpl
 from datasette.jump import JumpSQL
 
+from .csp import configured_csp_allowlist
 from .permissions import app_permission_sql, register_app_actions
 from .registry import Registry
 from .views import (
@@ -88,6 +89,8 @@ def jump_items_sql(datasette, actor, request):
 
 @hookimpl
 async def startup(datasette):
+    # Fail fast on invalid allowed_csp_origins plugin configuration
+    configured_csp_allowlist(datasette)
     await Registry(datasette).ensure_tables()
 
 
@@ -114,4 +117,4 @@ def register_agent_tools(datasette):
 
     from .agent_tools import get_app_edit_tools
 
-    return get_app_edit_tools(AgentTool)
+    return get_app_edit_tools(AgentTool, datasette)

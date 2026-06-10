@@ -39,6 +39,20 @@ Stored apps are rendered inside a sandboxed iframe. The plugin injects a Content
 
 Direct network access is blocked unless the app has exact `https://` origins configured. Those same origins are allowed for remote images, external script tags, and external stylesheet links/style elements. Localhost origins are never allowed. Local file previews using `data:` and `blob:` image URLs are allowed.
 
+Configuring those origins on an app is restricted, because an origin can be used to leak private data out of the app. Users with the `apps-set-csp` permission can set any valid `https://` origin using a free-form field on the create and edit pages. Other users can only pick from the allow-list configured by the `allowed_csp_origins` plugin setting, if one exists - otherwise they cannot configure network access at all. When editing an app that already has origins outside that allow-list - for example origins added earlier by a privileged user - those existing origins can be kept or removed but new arbitrary origins cannot be added.
+
+To configure the allow-list:
+
+```yaml
+plugins:
+  datasette-apps:
+    allowed_csp_origins:
+    - https://cdn.jsdelivr.net
+    - cdnjs.cloudflare.com
+```
+
+Entries without a scheme are treated as `https://` origins.
+
 The iframe bridge reports JavaScript errors, unhandled promise rejections, CSP violations, failed resources, fetch failures, `console.error()` calls, and failed Datasette data queries back to the parent page. The app page shows these in a small expandable error panel above the iframe. It also captures `console.log()` messages and Datasette data helper calls in a collapsed log panel below the iframe.
 
 The bridge also replaces `history.replaceState()`, `history.pushState()`, `history.back()`, `history.forward()`, and `history.go()` with no-op functions inside the sandboxed iframe, avoiding browser errors from apps that try to manage URL state.
@@ -57,7 +71,15 @@ Stored query access is configured using a picker on the create and edit pages. T
 
 ### Permissions
 
-The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, `delete-app`, and `manage-app-access`. Stored app owners can always view, edit, delete, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
+The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, `delete-app`, `manage-app-access`, and `apps-set-csp`. Stored app owners can always view, edit, delete, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
+
+The `apps-set-csp` permission controls who can set arbitrary CSP origins on an app - see [Sandboxed apps](#sandboxed-apps). Nobody has it by default. To grant it to a specific user:
+
+```yaml
+permissions:
+  apps-set-csp:
+    id: admin
+```
 
 Deleting a stored app hides it from the catalog and disables access to its pages and query API. Its `app_revisions` rows remain in the database so a database administrator can recover it if needed.
 
@@ -81,7 +103,7 @@ The create and edit pages include a copyable prompt for an LLM. The prompt is as
 
 The create and edit pages use Datasette's existing bundled CodeMirror editor for the HTML source textarea.
 
-The edit page includes a private checkbox, SQL query database access, stored query access, and allowed network origins.
+The edit page includes a private checkbox, SQL query database access, stored query access, and allowed network origins. The network origins control is a free-form list for users with the `apps-set-csp` permission, a set of checkboxes when an `allowed_csp_origins` allow-list is configured, and hidden otherwise.
 
 Plugins can add their own apps to the central catalog during startup:
 

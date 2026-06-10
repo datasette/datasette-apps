@@ -13,6 +13,7 @@
 
 {% block content %}
 {% import "_stored_query_picker.html" as stored_query_picker %}
+{% import "_csp_origins_field.html" as csp_origins_field %}
 {% import "_llm_prompt.html" as llm_prompt %}
 <h1>Create app</h1>
 
@@ -77,17 +78,7 @@
         {{ stored_query_picker.picker(stored_query_options, query_search_url) }}
       </div>
 
-      <h2>Network access</h2>
-      <div class="datasette-app-form-row">
-        <label for="app-csp-origins">Allowed network and asset origins</label>
-        <p class="datasette-app-form-warning">
-          Be cautious: any site listed here could receive private data from this app.
-        </p>
-        <textarea id="app-csp-origins" name="csp_origins" rows="4" placeholder="https://cdn.jsdelivr.net"></textarea>
-        <p class="datasette-app-form-help">
-          Enter exact https:// origins, one per line. Do not include paths, query strings, wildcards, or localhost. These origins can be used for fetch(), images, scripts, and styles.
-        </p>
-      </div>
+      {{ csp_origins_field.field(show_csp_section, can_set_csp, csp_origin_options) }}
 
       <div class="datasette-app-form-actions">
         <button type="submit">Create app</button>

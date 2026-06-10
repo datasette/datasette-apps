@@ -1,6 +1,15 @@
 import pytest
+from datasette.app import Datasette
 
-from datasette_apps.csp import APP_VIEW_PARENT_CSP, build_csp, normalize_connect_origin
+from datasette_apps.csp import (
+    APP_VIEW_PARENT_CSP,
+    CspOriginNotAllowed,
+    build_csp,
+    configured_csp_allowlist,
+    normalize_allowlist_origin,
+    normalize_connect_origin,
+    resolve_csp_origins,
+)
 from datasette_apps.rendering import (
     build_app_srcdoc,
     iframe_bridge_script,
@@ -57,6 +66,126 @@ def test_build_csp_can_allow_insecure_origins_in_tests(monkeypatch):
 def test_normalize_connect_origin_rejects_unsafe_origins(origin):
     with pytest.raises(ValueError):
         normalize_connect_origin(origin)
+
+
+@pytest.mark.parametrize(
+    "origin,expected",
+    [
+        ("cdn.jsdelivr.net", "https://cdn.jsdelivr.net"),
+        ("https://cdn.jsdelivr.net", "https://cdn.jsdelivr.net"),
+        ("https://cdn.jsdelivr.net/", "https://cdn.jsdelivr.net"),
+    ],
+)
+def test_normalize_allowlist_origin_normalizes_bare_domains(origin, expected):
+    assert normalize_allowlist_origin(origin) == expected
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://*.github.com",
+        "https://cdn.example.com/path",
+        "localhost",
+        "",
+    ],
+)
+def test_normalize_allowlist_origin_rejects_invalid_entries(origin):
+    with pytest.raises(ValueError):
+        normalize_allowlist_origin(origin)
+
+
+def _datasette_with(plugin_config=None, permissions=None):
+    config = {}
+    if plugin_config:
+        config["plugins"] = {"datasette-apps": plugin_config}
+    if permissions:
+        config["permissions"] = permissions
+    return Datasette(memory=True, config=config)
+
+
+def test_configured_csp_allowlist_normalizes_dedupes_and_sorts():
+    datasette = _datasette_with(
+        {
+            "allowed_csp_origins": [
+                "cdn.jsdelivr.net",
+                "https://api.github.com",
+                "https://cdn.jsdelivr.net",
+            ]
+        }
+    )
+    assert configured_csp_allowlist(datasette) == [
+        "https://api.github.com",
+        "https://cdn.jsdelivr.net",
+    ]
+
+
+def test_configured_csp_allowlist_defaults_to_empty():
+    assert configured_csp_allowlist(Datasette(memory=True)) == []
+
+
+def test_configured_csp_allowlist_raises_on_invalid_entry():
+    datasette = _datasette_with({"allowed_csp_origins": ["https://*.example.com"]})
+    with pytest.raises(ValueError):
+        configured_csp_allowlist(datasette)
+
+
+@pytest.mark.asyncio
+async def test_resolve_csp_origins_allows_any_origin_with_permission():
+    datasette = _datasette_with(permissions={"apps-set-csp": {"id": "admin"}})
+    await datasette.invoke_startup()
+
+    assert await resolve_csp_origins(
+        datasette, {"id": "admin"}, ["https://attacker.example.com"]
+    ) == ["https://attacker.example.com"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_csp_origins_restricts_to_allowlist_without_permission():
+    datasette = _datasette_with({"allowed_csp_origins": ["cdn.jsdelivr.net"]})
+    await datasette.invoke_startup()
+
+    assert await resolve_csp_origins(
+        datasette, {"id": "alice"}, ["https://cdn.jsdelivr.net"]
+    ) == ["https://cdn.jsdelivr.net"]
+
+    with pytest.raises(CspOriginNotAllowed) as excinfo:
+        await resolve_csp_origins(
+            datasette, {"id": "alice"}, ["https://attacker.example.com"]
+        )
+    assert "https://attacker.example.com" in str(excinfo.value)
+    assert "apps-set-csp" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_resolve_csp_origins_denies_all_without_permission_or_allowlist():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+
+    with pytest.raises(CspOriginNotAllowed):
+        await resolve_csp_origins(
+            datasette, {"id": "alice"}, ["https://cdn.jsdelivr.net"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_csp_origins_preserves_existing_origins():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+
+    assert await resolve_csp_origins(
+        datasette,
+        {"id": "alice"},
+        ["https://api.github.com"],
+        existing_origins=["https://api.github.com"],
+    ) == ["https://api.github.com"]
+
+    with pytest.raises(CspOriginNotAllowed):
+        await resolve_csp_origins(
+            datasette,
+            {"id": "alice"},
+            ["https://api.github.com", "https://attacker.example.com"],
+            existing_origins=["https://api.github.com"],
+        )
 
 
 def test_build_app_srcdoc_preserves_doctype_and_inserts_csp_first_in_head():

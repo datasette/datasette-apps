@@ -9,7 +9,13 @@ from urllib.parse import urlencode
 from datasette import Forbidden, NotFound, Response
 from datasette.resources import DatabaseResource, QueryResource, TableResource
 
-from .csp import APP_VIEW_PARENT_CSP, build_csp
+from .csp import (
+    APP_VIEW_PARENT_CSP,
+    CspOriginNotAllowed,
+    build_csp,
+    configured_csp_allowlist,
+    resolve_csp_origins,
+)
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
 from .permissions import AppResource, AppsResource
 from .prompt import build_llm_prompt_data, stored_query_options
@@ -136,11 +142,39 @@ async def _visible_database_options(datasette, actor, selected=()):
 
 
 def _csp_origins_from_post(post):
-    return [
-        origin.strip()
-        for origin in (post.get("csp_origins") or "").splitlines()
-        if origin.strip()
-    ]
+    origins = []
+    for value in post.getlist("csp_origins"):
+        for origin in value.splitlines():
+            origin = origin.strip()
+            if origin and origin not in origins:
+                origins.append(origin)
+    return origins
+
+
+async def _csp_form_context(datasette, actor, existing_origins=()):
+    can_set_csp = await datasette.allowed(
+        action="apps-set-csp", resource=AppsResource(), actor=actor
+    )
+    options = []
+    for origin in list(existing_origins) + configured_csp_allowlist(datasette):
+        if not any(option["origin"] == origin for option in options):
+            options.append({"origin": origin, "checked": origin in existing_origins})
+    return {
+        "can_set_csp": can_set_csp,
+        "csp_origin_options": options,
+        "show_csp_section": can_set_csp or bool(options),
+    }
+
+
+async def _resolved_csp_origins_or_forbidden(
+    datasette, actor, post, existing_origins=()
+):
+    try:
+        return await resolve_csp_origins(
+            datasette, actor, _csp_origins_from_post(post), existing_origins
+        )
+    except CspOriginNotAllowed as e:
+        raise Forbidden(str(e))
 
 
 def _access_mode_from_post(post):
@@ -324,6 +358,7 @@ async def create_app(datasette, request):
                     "stored_query_options": [],
                     "query_search_url": datasette.urls.path("/-/queries.json"),
                     "codemirror_assets": _codemirror_assets(),
+                    **(await _csp_form_context(datasette, actor)),
                 },
                 request=request,
             )
@@ -340,8 +375,10 @@ async def create_app(datasette, request):
     if "stored_queries_present" in post:
         stored_queries = await _selected_stored_queries(datasette, actor, post)
     csp_origins = []
-    if "csp_origins" in post:
-        csp_origins = _csp_origins_from_post(post)
+    if "csp_origins" in post or "csp_origins_present" in post:
+        csp_origins = await _resolved_csp_origins_or_forbidden(
+            datasette, actor, post
+        )
     app = await registry.create_stored_app(
         actor_id=actor_id,
         name=post.get("name") or "Untitled app",
@@ -419,7 +456,8 @@ async def edit_app(datasette, request):
         access_mode = await registry.get_access_mode(app_id)
         sql_databases = set(await registry.get_sql_databases(app_id))
         stored_queries = await registry.get_stored_queries(app_id)
-        csp_origins = "\n".join(await registry.get_csp_origins(app_id))
+        existing_csp_origins = await registry.get_csp_origins(app_id)
+        csp_origins = "\n".join(existing_csp_origins)
         can_delete = await datasette.allowed(
             action="delete-app", resource=AppResource(app_id), actor=actor
         )
@@ -442,6 +480,11 @@ async def edit_app(datasette, request):
                     "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
                     "codemirror_assets": _codemirror_assets(),
                     "can_delete": can_delete,
+                    **(
+                        await _csp_form_context(
+                            datasette, actor, existing_csp_origins
+                        )
+                    ),
                 },
                 request=request,
             )
@@ -461,8 +504,10 @@ async def edit_app(datasette, request):
         update_kwargs["stored_queries"] = await _selected_stored_queries(
             datasette, actor, post
         )
-    if "csp_origins" in post:
-        update_kwargs["csp_origins"] = _csp_origins_from_post(post)
+    if "csp_origins" in post or "csp_origins_present" in post:
+        update_kwargs["csp_origins"] = await _resolved_csp_origins_or_forbidden(
+            datasette, actor, post, await registry.get_csp_origins(app_id)
+        )
     await registry.update_stored_app(
         app_id,
         post.get("name") or app["name"],
