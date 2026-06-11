@@ -1,6 +1,9 @@
+import re
+
 from datasette import hookimpl
 from datasette.jump import JumpSQL
 
+from .acl import app_acl_roles, backfill_acl_grants, datasette_share_assets
 from .csp import configured_csp_allowlist
 from .permissions import app_permission_sql, register_app_actions
 from .registry import Registry
@@ -52,6 +55,12 @@ def permission_resources_sql(datasette, actor, action):
 
 
 @hookimpl
+def datasette_acl_roles(datasette):
+    """Viewer / Editor / Manager roles for the ``app`` resource type."""
+    return app_acl_roles()
+
+
+@hookimpl
 def jump_items_sql(datasette, actor, request):
     async def inner():
         app_sql, app_params = await datasette.allowed_resources_sql(
@@ -94,6 +103,7 @@ async def startup(datasette):
     # Fail fast on invalid allowed_csp_origins plugin configuration
     configured_csp_allowlist(datasette)
     await Registry(datasette).ensure_tables()
+    await backfill_acl_grants(datasette)
 
 
 @hookimpl
@@ -101,9 +111,28 @@ def top_homepage(datasette, request):
     return top_homepage_html(datasette, request)
 
 
+# The share dialog only appears on individual app pages, so its assets are
+# loaded there and nowhere else (acl-share registers nothing site-wide).
+_APP_PAGE_RE = re.compile(r"^/-/apps/(?!create$)[^/]+$")
+
+
+def _is_app_page(request):
+    return bool(request and _APP_PAGE_RE.match(request.path or ""))
+
+
 @hookimpl
-def extra_css_urls():
-    return ["/-/static-plugins/datasette-apps/datasette-apps.css"]
+def extra_css_urls(datasette, request):
+    urls = ["/-/static-plugins/datasette-apps/datasette-apps.css"]
+    if datasette_share_assets is not None and _is_app_page(request):
+        urls.extend(datasette_share_assets(datasette)["css"])
+    return urls
+
+
+@hookimpl
+def extra_js_urls(datasette, request):
+    if datasette_share_assets is None or not _is_app_page(request):
+        return []
+    return datasette_share_assets(datasette)["js"]
 
 
 @hookimpl

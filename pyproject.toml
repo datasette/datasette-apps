@@ -19,7 +19,12 @@ dev = [
     "playwright>=1.60.0",
     "pytest",
     "pytest-asyncio",
+    "datasette-acl>=0.5a1",
+    "datasette-acl-share>=0.0.1a2",
 ]
+
+[tool.uv.sources]
+datasette-acl-share = { url = "https://github.com/datasette/datasette-acl-share/releases/download/0.0.1a2/datasette_acl_share-0.0.1a2-py3-none-any.whl" }
 
 [build-system]
 requires = ["setuptools"]
