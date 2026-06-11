@@ -375,6 +375,9 @@ async def view_app(datasette, request):
     can_edit = await datasette.allowed(
         action="edit-app", resource=AppResource(app_id), actor=actor
     )
+    can_manage = await datasette.allowed(
+        action="manage-app-access", resource=AppResource(app_id), actor=actor
+    )
     full_screen = request.args.get("full") == "1"
     template = "app_full.html" if full_screen else "app_view.html"
     return Response.html(
@@ -391,6 +394,10 @@ async def view_app(datasette, request):
                 "current_path": request.path,
                 "can_edit": can_edit,
                 "can_pin": bool(actor),
+                "show_share": can_manage,
+                "actor_json": json.dumps({"id": _actor_id(actor), "kind": "user"})
+                if actor
+                else "",
             },
             request=request,
         ),

@@ -12,6 +12,10 @@ requires-python = ">=3.10"
 dependencies = [
     "datasette>=1.0a31",
     "datasette-agent-edit>=0.1a0",
+    "datasette-acl>=0.5a1",
+    # PyPI rejects direct-URL dependencies; switch to a version specifier
+    # once datasette-acl-share is published to PyPI.
+    "datasette-acl-share @ https://github.com/datasette/datasette-acl-share/releases/download/0.0.1a2/datasette_acl_share-0.0.1a2-py3-none-any.whl",
 ]
 
 [dependency-groups]
@@ -20,6 +24,12 @@ dev = [
     "pytest",
     "pytest-asyncio",
 ]
+
+[tool.uv.sources]
+# Temporary: standard_roles() is not in a datasette-acl release yet (0.5a1
+# predates it). When removing this, also bump the datasette-acl version
+# constraint above to the first release that ships standard_roles().
+datasette-acl = { path = "../datasette-acl", editable = true }
 
 [build-system]
 requires = ["setuptools"]

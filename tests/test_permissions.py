@@ -98,7 +98,11 @@ async def test_actors_with_view_app_can_create_and_view_external_apps():
 
 
 @pytest.mark.asyncio
-async def test_non_private_app_requires_view_app_permission():
+async def test_non_private_app_viewable_by_signed_in_actors():
+    # With datasette-acl installed, "not private" maps to a Viewer grant for
+    # the _signed_in wildcard principal: any signed-in actor can view, no
+    # instance-level view-app configuration required. Anonymous actors still
+    # need an explicit config grant.
     datasette = Datasette(memory=True)
     registry = Registry(datasette)
     app = await registry.create_stored_app(
@@ -110,10 +114,15 @@ async def test_non_private_app_requires_view_app_permission():
     await registry.set_access_mode(app["id"], "not-private")
     await datasette.invoke_startup()
 
-    assert not await datasette.allowed(
+    assert await datasette.allowed(
         action="view-app",
         resource=AppResource(app["id"]),
         actor={"id": "bob"},
+    )
+    assert not await datasette.allowed(
+        action="view-app",
+        resource=AppResource(app["id"]),
+        actor=None,
     )
 
     datasette_with_permission = Datasette(
