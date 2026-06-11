@@ -6,7 +6,7 @@ from datasette_acl.grants import grant, list_grants, revoke
 
 from datasette_apps import Registry
 from datasette_apps import acl as apps_acl
-from datasette_apps.permissions import AppResource, app_permission_sql
+from datasette_apps.permissions import AppResource
 
 ALICE = {"id": "alice"}
 BOB = {"id": "bob"}
@@ -236,21 +236,3 @@ async def test_shared_app_appears_in_catalog():
     )
     after = await datasette.client.get("/-/apps", actor=BOB)
     assert "Catalog app" in after.text
-
-
-@pytest.mark.asyncio
-async def test_degrades_without_acl(monkeypatch):
-    # Simulate datasette-acl not being importable: permission SQL must not
-    # reference acl tables and the grant helpers must no-op.
-    monkeypatch.setattr(apps_acl, "_grant", None)
-    monkeypatch.setattr(apps_acl, "_revoke", None)
-
-    permission_sql = app_permission_sql(ALICE, "view-app")
-    assert "acl" not in permission_sql.restriction_sql
-
-    datasette = Datasette(memory=True)
-    app = await create_app(datasette)
-    await Registry(datasette).set_access_mode(app["id"], "not-private")
-    assert await apps_acl.seed_owner_manager_grant(datasette, app["id"], "alice") is None
-    stats = await apps_acl.backfill_acl_grants(datasette)
-    assert stats["skipped"] is True

@@ -1,8 +1,7 @@
-"""Optional datasette-acl integration for per-app sharing.
+"""datasette-acl integration for per-app sharing.
 
-datasette-acl and datasette-acl-share are soft dependencies: everything in
-this module degrades to a no-op when they are not installed, leaving the
-legacy owner-only / is_private permission model in charge.
+datasette-acl and datasette-acl-share (the share dialog UI) are hard
+dependencies; acl grants are the source of truth for per-app access.
 
 The mapping between the legacy model and acl grants:
 
@@ -17,25 +16,14 @@ wildcard. The share dialog can layer further per-actor grants on top.
 
 from __future__ import annotations
 
-try:
-    from datasette_acl.grants import grant as _grant, revoke as _revoke
-    from datasette_acl.internal_migrations import (
-        internal_migrations as _acl_internal_migrations,
-    )
-    from datasette_acl.roles import AclRole, build_roles_registry
-    from sqlite_utils import Database as _SqliteUtilsDatabase
-except ImportError:
-    _grant = None
-    _revoke = None
-    _acl_internal_migrations = None
-    AclRole = None
-    build_roles_registry = None
-    _SqliteUtilsDatabase = None
+from datasette_acl.grants import grant as _grant, revoke as _revoke
+from datasette_acl.internal_migrations import (
+    internal_migrations as _acl_internal_migrations,
+)
+from datasette_acl.roles import build_roles_registry, standard_roles
+from sqlite_utils import Database as _SqliteUtilsDatabase
 
-try:
-    from datasette_acl_share import datasette_share_assets
-except ImportError:
-    datasette_share_assets = None
+from datasette_acl_share import datasette_share_assets
 
 APP_RESOURCE_TYPE = "app"
 APPS_PARENT = "apps"
@@ -45,48 +33,30 @@ _MIGRATION_TABLE = "_datasette_apps_acl_migration"
 _MIGRATION_KEY = "grants-backfill-v1"
 
 
-def acl_available():
-    return _grant is not None
-
-
 def app_acl_roles():
     """Viewer / Editor / Manager roles for the ``app`` resource type.
 
-    Manager is the single ``manage=True`` role; ``manage-app-access`` appears
-    in no other role, which is what authorizes re-sharing via the dialog.
+    Manager is the single ``manage=True`` role; ``delete-app`` and
+    ``manage-app-access`` appear in no other role, which is what authorizes
+    re-sharing via the dialog.
     """
-    if AclRole is None:
-        return []
-    return [
-        AclRole(
-            resource_type=APP_RESOURCE_TYPE,
-            name="Viewer",
-            actions=["view-app"],
-            rank=1,
-            description="Can view the app",
-        ),
-        AclRole(
-            resource_type=APP_RESOURCE_TYPE,
-            name="Editor",
-            actions=["view-app", "edit-app"],
-            rank=2,
-            description="Can view and edit the app",
-        ),
-        AclRole(
-            resource_type=APP_RESOURCE_TYPE,
-            name="Manager",
-            actions=["view-app", "edit-app", "delete-app", "manage-app-access"],
-            rank=3,
-            manage=True,
-            description="Full control, including sharing and deletion",
-        ),
-    ]
+    return standard_roles(
+        APP_RESOURCE_TYPE,
+        view="view-app",
+        edit="edit-app",
+        manage=["delete-app", "manage-app-access"],
+        descriptions={
+            "Viewer": "Can view the app",
+            "Editor": "Can view and edit the app",
+            "Manager": "Full control, including sharing and deletion",
+        },
+    )
 
 
 def _acl_ready(datasette):
     # grant(role=...) resolves names against the registry that acl's own
-    # startup hook builds; before startup (or without acl) seeding must no-op.
-    return acl_available() and getattr(datasette, "_acl_roles_registry", None) is not None
+    # startup hook builds; before startup seeding must no-op.
+    return getattr(datasette, "_acl_roles_registry", None) is not None
 
 
 async def seed_owner_manager_grant(datasette, app_id, owner_actor_id):
@@ -175,13 +145,9 @@ async def backfill_acl_grants(datasette, *, force=False):
     For every live stored app: owner -> Manager grant, and is_private=0 ->
     ``_signed_in`` Viewer grant. External apps are skipped (no owner; their
     visibility stays config-driven). Doubly idempotent: a marker row
-    short-circuits reruns, and grant() only inserts missing actions. No-op
-    when acl is not installed.
+    short-circuits reruns, and grant() only inserts missing actions.
     """
     stats = {"owners": 0, "wildcards": 0, "skipped": False}
-    if not acl_available():
-        stats["skipped"] = True
-        return stats
     db = datasette.get_internal_database()
     await _ensure_acl_tables(db)
     if not await _ensure_app_roles_registry(datasette):

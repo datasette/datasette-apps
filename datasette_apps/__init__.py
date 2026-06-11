@@ -123,14 +123,14 @@ def _is_app_page(request):
 @hookimpl
 def extra_css_urls(datasette, request):
     urls = ["/-/static-plugins/datasette-apps/datasette-apps.css"]
-    if datasette_share_assets is not None and _is_app_page(request):
+    if _is_app_page(request):
         urls.extend(datasette_share_assets(datasette)["css"])
     return urls
 
 
 @hookimpl
 def extra_js_urls(datasette, request):
-    if datasette_share_assets is None or not _is_app_page(request):
+    if not _is_app_page(request):
         return []
     return datasette_share_assets(datasette)["js"]
 

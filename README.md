@@ -103,14 +103,12 @@ External apps registered by plugins are not private by default, so they also req
 
 ### Sharing
 
-If [datasette-acl](https://github.com/datasette/datasette-acl) and [datasette-acl-share](https://github.com/datasette/datasette-acl-share) are installed (along with a persistent internal database, `datasette --internal internal.db`), stored apps gain per-user sharing:
+Stored apps support per-user sharing, built on [datasette-acl](https://github.com/datasette/datasette-acl) and [datasette-acl-share](https://github.com/datasette/datasette-acl-share) (dependencies of this plugin). Run Datasette with a persistent internal database (`datasette --internal internal.db`) so grants survive restarts:
 
 - Apps register **Viewer** (`view-app`), **Editor** (`view-app`, `edit-app`) and **Manager** (everything, including `manage-app-access` and `delete-app`) roles with datasette-acl.
 - Creating an app grants its creator the Manager role; existing apps are backfilled with owner grants once at startup.
 - App pages show a **Share** button to managers, opening the datasette-acl-share dialog to grant other users (or groups, or everyone) access.
 - The private checkbox maps onto a `_signed_in` wildcard Viewer grant: marking an app "not private" lets any signed-in actor view it; marking it private revokes that wildcard grant (per-user grants are unaffected).
-
-Without those plugins installed, the owner-only permission model described above applies unchanged.
 
 Signed-in users can pin apps from the catalog and from individual stored app pages. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
 

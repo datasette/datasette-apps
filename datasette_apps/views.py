@@ -465,7 +465,7 @@ async def view_app(datasette, request):
                 "current_path": request.path,
                 "can_edit": can_edit,
                 "can_pin": bool(actor),
-                "show_share": can_manage and datasette_share_assets is not None,
+                "show_share": can_manage,
                 "actor_json": json.dumps({"id": _actor_id(actor), "kind": "user"})
                 if actor
                 else "",
