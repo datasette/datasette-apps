@@ -16,6 +16,16 @@
       {% if can_edit %}
       <a class="datasette-app-button" href="{{ urls.path('/-/apps/' ~ app.id ~ '/edit') }}">Edit app</a>
       {% endif %}
+      {% if show_share %}
+      <datasette-acl-share-dialog
+        resource-type="app"
+        parent="apps"
+        child="{{ app.id }}"
+        resource-label="{{ app.name }}"
+        actor-json="{{ actor_json }}"
+        trigger-label="Share"
+      ></datasette-acl-share-dialog>
+      {% endif %}
       {% if can_pin %}
         <form class="datasette-app-pin-form" method="post" action="{{ urls.path('/-/apps/' ~ app.id ~ '/' ~ ('unpin' if pinned else 'pin')) }}">
           <input type="hidden" name="next" value="{{ current_path }}">

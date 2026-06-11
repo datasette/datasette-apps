@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from datasette import Forbidden, NotFound, Response
 from datasette.resources import DatabaseResource, QueryResource, TableResource
 
+from .acl import datasette_share_assets
 from .csp import APP_VIEW_PARENT_CSP, build_csp
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
 from .permissions import AppResource, AppsResource
@@ -375,6 +376,9 @@ async def view_app(datasette, request):
     can_edit = await datasette.allowed(
         action="edit-app", resource=AppResource(app_id), actor=actor
     )
+    can_manage = await datasette.allowed(
+        action="manage-app-access", resource=AppResource(app_id), actor=actor
+    )
     full_screen = request.args.get("full") == "1"
     template = "app_full.html" if full_screen else "app_view.html"
     return Response.html(
@@ -391,6 +395,10 @@ async def view_app(datasette, request):
                 "current_path": request.path,
                 "can_edit": can_edit,
                 "can_pin": bool(actor),
+                "show_share": can_manage and datasette_share_assets is not None,
+                "actor_json": json.dumps({"id": _actor_id(actor), "kind": "user"})
+                if actor
+                else "",
             },
             request=request,
         ),
