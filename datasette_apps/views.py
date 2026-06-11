@@ -9,7 +9,6 @@ from urllib.parse import urlencode
 from datasette import Forbidden, NotFound, Response
 from datasette.resources import DatabaseResource, QueryResource, TableResource
 
-from .acl import datasette_share_assets
 from .csp import APP_VIEW_PARENT_CSP, build_csp
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
 from .permissions import AppResource, AppsResource
@@ -395,7 +394,7 @@ async def view_app(datasette, request):
                 "current_path": request.path,
                 "can_edit": can_edit,
                 "can_pin": bool(actor),
-                "show_share": can_manage and datasette_share_assets is not None,
+                "show_share": can_manage,
                 "actor_json": json.dumps({"id": _actor_id(actor), "kind": "user"})
                 if actor
                 else "",

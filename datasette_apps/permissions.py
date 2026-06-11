@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datasette.permissions import Action, PermissionSQL, Resource
 
-from .acl import APPS_PARENT, acl_available
+from .acl import APPS_PARENT
 
 
 class AppsResource(Resource):
@@ -103,9 +103,7 @@ _ACL_GRANTS_RESTRICTION_SQL = """
 
 
 def _with_acl_grants(restriction_sql):
-    if acl_available():
-        return f"{restriction_sql}\nUNION\n{_ACL_GRANTS_RESTRICTION_SQL}"
-    return restriction_sql
+    return f"{restriction_sql}\nUNION\n{_ACL_GRANTS_RESTRICTION_SQL}"
 
 
 def app_permission_sql(actor, action):
