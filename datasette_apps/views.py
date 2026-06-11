@@ -376,9 +376,7 @@ async def create_app(datasette, request):
         stored_queries = await _selected_stored_queries(datasette, actor, post)
     csp_origins = []
     if "csp_origins" in post or "csp_origins_present" in post:
-        csp_origins = await _resolved_csp_origins_or_forbidden(
-            datasette, actor, post
-        )
+        csp_origins = await _resolved_csp_origins_or_forbidden(datasette, actor, post)
     app = await registry.create_stored_app(
         actor_id=actor_id,
         name=post.get("name") or "Untitled app",
@@ -480,11 +478,7 @@ async def edit_app(datasette, request):
                     "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
                     "codemirror_assets": _codemirror_assets(),
                     "can_delete": can_delete,
-                    **(
-                        await _csp_form_context(
-                            datasette, actor, existing_csp_origins
-                        )
-                    ),
+                    **(await _csp_form_context(datasette, actor, existing_csp_origins)),
                 },
                 request=request,
             )

@@ -301,9 +301,7 @@ async def test_edit_form_not_private_access_mode_allows_actor_with_view_app():
 
 
 CSP_ALLOWLIST_CONFIG = {
-    "plugins": {
-        "datasette-apps": {"allowed_csp_origins": ["https://cdn.jsdelivr.net"]}
-    }
+    "plugins": {"datasette-apps": {"allowed_csp_origins": ["https://cdn.jsdelivr.net"]}}
 }
 
 
@@ -433,10 +431,7 @@ async def test_edit_form_shows_existing_out_of_list_origin_as_checkbox():
         'type="checkbox" name="csp_origins" value="https://cdn.jsdelivr.net"'
         in response.text
     )
-    assert (
-        'value="https://cdn.jsdelivr.net" checked'
-        not in response.text
-    )
+    assert 'value="https://cdn.jsdelivr.net" checked' not in response.text
 
 
 @pytest.mark.asyncio

@@ -304,9 +304,7 @@ async def test_app_create_agent_tool_allows_allowlisted_csp_origin():
     datasette = Datasette(
         memory=True,
         config={
-            "plugins": {
-                "datasette-apps": {"allowed_csp_origins": ["cdn.jsdelivr.net"]}
-            }
+            "plugins": {"datasette-apps": {"allowed_csp_origins": ["cdn.jsdelivr.net"]}}
         },
     )
     await datasette.invoke_startup()
@@ -355,9 +353,7 @@ def test_app_create_schema_mentions_allowlist_when_configured():
     datasette = Datasette(
         memory=True,
         config={
-            "plugins": {
-                "datasette-apps": {"allowed_csp_origins": ["cdn.jsdelivr.net"]}
-            }
+            "plugins": {"datasette-apps": {"allowed_csp_origins": ["cdn.jsdelivr.net"]}}
         },
     )
     tools = {tool.name: tool for tool in get_app_edit_tools(FakeAgentTool, datasette)}
