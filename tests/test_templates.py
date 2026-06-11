@@ -96,6 +96,9 @@ async def test_app_links_respect_base_url():
     view_response = await datasette.client.get(
         f"/-/apps/{app['id']}", actor={"id": "alice"}
     )
+    full_response = await datasette.client.get(
+        f"/-/apps/{app['id']}?full=1", actor={"id": "alice"}
+    )
     edit_response = await datasette.client.get(
         f"/-/apps/{app['id']}/edit", actor={"id": "alice"}
     )
@@ -112,6 +115,11 @@ async def test_app_links_respect_base_url():
     assert f'href="/prefix/-/apps/{app["id"]}/edit"' in view_response.text
     assert f'action="/prefix/-/apps/{app["id"]}/pin"' in view_response.text
 
+    assert (
+        'href="/prefix/-/static-plugins/datasette-apps/datasette-apps.css"'
+        in full_response.text
+    )
+
     assert f'href="/prefix/-/apps/{app["id"]}/revisions/2"' in edit_response.text
     assert f'href="/prefix/-/apps/{app["id"]}/revisions/1"' in edit_response.text
 
@@ -120,6 +128,7 @@ async def test_app_links_respect_base_url():
     assert 'href="/-/apps' not in (
         list_response.text
         + view_response.text
+        + full_response.text
         + edit_response.text
         + revision_response.text
     )

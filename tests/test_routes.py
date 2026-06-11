@@ -83,6 +83,7 @@ async def test_create_view_and_edit_stored_app():
     assert "var mirrorViewport = true;" in full.text
     assert "datasette-app-viewport" in full.text
     assert "viewport-fit=cover" in full.text
+    assert 'href="/-/static-plugins/datasette-apps/datasette-apps.css"' in full.text
     assert '<iframe\n  id="datasette-app-frame"' in full.text
     assert 'class="datasette-app-frame datasette-app-frame-full"' in full.text
     assert "height: 100vh;" in full.text

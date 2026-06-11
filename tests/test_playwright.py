@@ -726,6 +726,58 @@ def test_iframe_link_click_shows_parent_confirmation_modal(tmp_path):
         assert popup.url == "https://example.com/docs?from=app#section"
 
 
+def test_fullscreen_parent_bridge_ui_uses_plugin_stylesheet(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<a id="external-link" href="https://example.com/docs">Open docs</a>
+<script>
+console.error("Fullscreen error");
+console.log("Fullscreen log");
+</script>""",
+            name="Fullscreen bridge styles",
+        )
+    )
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app) + "?full=1")
+        page.locator(".datasette-app-error-panel:not([hidden])").wait_for()
+        page.locator(".datasette-app-log-panel:not([hidden])").wait_for()
+
+        assert (
+            page.locator(
+                'link[href="/-/static-plugins/datasette-apps/datasette-apps.css"]'
+            ).count()
+            == 1
+        )
+        assert (
+            page.locator(".datasette-app-error-panel").evaluate(
+                "element => getComputedStyle(element).backgroundColor"
+            )
+            == "rgb(255, 250, 240)"
+        )
+        assert (
+            page.locator(".datasette-app-log-panel").evaluate(
+                "element => getComputedStyle(element).backgroundColor"
+            )
+            == "rgb(247, 249, 251)"
+        )
+
+        iframe = _iframe(page)
+        iframe.locator("#external-link").click()
+
+        modal = page.locator(".datasette-app-link-modal")
+        modal.wait_for(state="visible")
+        assert "Arial" in modal.locator(".datasette-app-link-dialog").evaluate(
+            "element => getComputedStyle(element).fontFamily"
+        )
+        assert (
+            modal.evaluate("element => getComputedStyle(element).position") == "fixed"
+        )
+        assert modal.evaluate("element => getComputedStyle(element).display") == "flex"
+
+
 def test_iframe_hash_link_click_runs_app_handler_without_parent_modal(tmp_path):
     server = DatasetteServer(tmp_path)
     app = asyncio.run(
