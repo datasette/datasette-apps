@@ -75,7 +75,7 @@
 
       <h2>Query access</h2>
       <div class="datasette-app-form-row">
-        {{ stored_query_picker.picker(stored_query_options, query_search_url) }}
+        {{ stored_query_picker.picker(stored_query_options, query_search_url, recent_query_url) }}
       </div>
 
       {{ csp_origins_field.field(show_csp_section, can_set_csp, csp_origin_options) }}

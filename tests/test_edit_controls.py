@@ -57,7 +57,11 @@ async def test_create_form_shows_access_data_and_network_controls():
     assert 'value="_memory"' in response.text
     assert "Query access" in response.text
     assert 'data-query-search-url="/-/queries.json"' in response.text
+    assert 'data-recent-query-url="/-/apps/recent-queries.json"' in response.text
     assert 'name="stored_queries_present"' in response.text
+    assert 'aria-controls="stored-query-results"' in response.text
+    assert "loadRecent()" in response.text
+    assert "moveActiveResult(1)" in response.text
     assert "Pick stored queries this app can run." in response.text
     assert "Changes take effect after you save this page" not in response.text
     assert "Network access" in response.text
@@ -159,6 +163,7 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
     assert 'value="_memory"' in response.text
     assert "Query access" in response.text
     assert 'data-query-search-url="/-/queries.json"' in response.text
+    assert 'data-recent-query-url="/-/apps/recent-queries.json"' in response.text
     assert 'name="stored_queries_present"' in response.text
     assert "Pick stored queries this app can run." in response.text
     assert "Changes take effect after you save this page" not in response.text
@@ -192,6 +197,58 @@ async def test_create_form_shows_database_link_and_table_preview(tmp_path):
     assert "alpha, beta, charlie, delta, echo, ..." in response.text
     assert "table_preview, _audit" not in response.text
     assert "alpha, beta, charlie, delta, echo, foxtrot" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_recent_stored_queries_endpoint_lists_newest_accessible_queries():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+    for name in ("old_report", "middle_report", "new_report", "newest_report"):
+        await datasette.add_query(
+            "_memory",
+            name,
+            "select 1",
+            source="user",
+            owner_id="alice",
+            is_private=True,
+        )
+    await datasette.add_query(
+        "_memory",
+        "hidden_report",
+        "select 1",
+        source="user",
+        owner_id="bob",
+        is_private=True,
+    )
+    created_at = {
+        "old_report": "2026-01-01 00:00:00",
+        "middle_report": "2026-01-02 00:00:00",
+        "new_report": "2026-01-03 00:00:00",
+        "newest_report": "2026-01-04 00:00:00",
+        "hidden_report": "2026-01-05 00:00:00",
+    }
+    for name, timestamp in created_at.items():
+        await datasette.get_internal_database().execute_write(
+            """
+            UPDATE queries
+            SET created_at = ?
+            WHERE database_name = '_memory' AND name = ?
+            """,
+            [timestamp, name],
+        )
+
+    response = await datasette.client.get(
+        "/-/apps/recent-queries.json", actor={"id": "alice"}
+    )
+
+    assert response.status_code == 200
+    assert [
+        query["database"] + "/" + query["name"] for query in response.json()["queries"]
+    ] == [
+        "_memory/newest_report",
+        "_memory/new_report",
+        "_memory/middle_report",
+    ]
 
 
 @pytest.mark.asyncio

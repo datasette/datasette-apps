@@ -1,14 +1,14 @@
-{% macro picker(stored_query_options, query_search_url) %}
-<div class="datasette-app-stored-query-picker" data-query-search-url="{{ query_search_url }}">
+{% macro picker(stored_query_options, query_search_url, recent_query_url=None) %}
+<div class="datasette-app-stored-query-picker" data-query-search-url="{{ query_search_url }}" data-recent-query-url="{{ recent_query_url or '' }}">
   <input type="hidden" name="stored_queries_present" value="1">
   <label for="stored-query-search">Stored queries</label>
   <p class="datasette-app-form-help">
     Pick stored queries this app can run.
   </p>
   <div class="datasette-app-stored-query-search-row">
-    <input id="stored-query-search" type="search" autocomplete="off" placeholder="Search stored queries">
+    <input id="stored-query-search" type="search" autocomplete="off" placeholder="Search stored queries" aria-autocomplete="list" aria-controls="stored-query-results" aria-expanded="false">
   </div>
-  <div class="datasette-app-stored-query-results" hidden></div>
+  <div id="stored-query-results" class="datasette-app-stored-query-results" role="listbox" hidden></div>
   <ul class="datasette-app-stored-query-list">
     {% for stored_query in stored_query_options %}
       <li
@@ -32,6 +32,7 @@
     return;
   }
   var searchUrl = picker.getAttribute("data-query-search-url");
+  var recentUrl = picker.getAttribute("data-recent-query-url");
   var input = picker.querySelector("input[type='search']");
   var results = picker.querySelector(".datasette-app-stored-query-results");
   var list = picker.querySelector(".datasette-app-stored-query-list");
@@ -40,7 +41,8 @@
     function(item) { return item.getAttribute("data-query-key"); }
   ));
   var pendingController = null;
-  var lastQuery = "";
+  var requestSerial = 0;
+  var activeResultIndex = -1;
 
   function renderListEmptyState() {
     list.hidden = selected.size === 0;
@@ -83,78 +85,67 @@
   function hideResults() {
     results.hidden = true;
     results.textContent = "";
+    input.setAttribute("aria-expanded", "false");
+    setActiveResult(-1);
   }
 
-  function renderResults(queries) {
-    results.textContent = "";
-    if (!queries.length) {
-      var empty = document.createElement("p");
-      empty.textContent = "No matching stored queries";
-      results.appendChild(empty);
-      results.hidden = false;
-      return;
-    }
-    queries.forEach(function(query) {
-      var key = query.database + "/" + query.name;
-      var button = document.createElement("button");
-      button.type = "button";
-      button.disabled = selected.has(key);
-      button.setAttribute("data-query-key", key);
-      button.setAttribute("data-query-label", query.title || key);
-      button.setAttribute("data-query-description", query.description || "");
-      button.setAttribute("data-query-parameters", JSON.stringify(query.parameters || query.params || []));
-      button.setAttribute("data-query-is-write", query.is_write ? "1" : "0");
-      var title = document.createElement("strong");
-      title.textContent = query.title || query.name;
-      var meta = document.createElement("span");
-      meta.textContent = key + (query.is_write ? " - writable" : "");
-      button.appendChild(title);
-      button.appendChild(meta);
-      results.appendChild(button);
+  function resultButtons() {
+    return Array.prototype.slice.call(
+      results.querySelectorAll("button[data-query-key]")
+    );
+  }
+
+  function selectableResultButtons() {
+    return resultButtons().filter(function(button) {
+      return !button.disabled;
     });
-    results.hidden = false;
   }
 
-  async function search() {
-    var q = input.value.trim();
-    lastQuery = q;
-    if (!q) {
-      hideResults();
+  function setActiveResult(index) {
+    var buttons = selectableResultButtons();
+    resultButtons().forEach(function(button) {
+      button.classList.remove("datasette-app-stored-query-active");
+      button.setAttribute("aria-selected", "false");
+    });
+    if (!buttons.length || index < 0) {
+      activeResultIndex = -1;
+      input.removeAttribute("aria-activedescendant");
       return;
     }
-    if (pendingController) {
-      pendingController.abort();
+    activeResultIndex = index;
+    if (activeResultIndex >= buttons.length) {
+      activeResultIndex = 0;
     }
-    pendingController = new AbortController();
-    try {
-      var response = await fetch(searchUrl + "?q=" + encodeURIComponent(q), {
-        credentials: "same-origin",
-        signal: pendingController.signal
-      });
-      if (!response.ok) {
-        throw new Error("Search failed");
-      }
-      var json = await response.json();
-      if (q === lastQuery) {
-        renderResults(json.queries || []);
-      }
-    } catch (error) {
-      if (error.name !== "AbortError") {
-        results.textContent = "Stored query search failed";
-        results.hidden = false;
-      }
-    }
+    var activeButton = buttons[activeResultIndex];
+    activeButton.classList.add("datasette-app-stored-query-active");
+    activeButton.setAttribute("aria-selected", "true");
+    input.setAttribute("aria-activedescendant", activeButton.id);
+    activeButton.scrollIntoView({block: "nearest"});
   }
 
-  input.addEventListener("input", function() {
-    window.clearTimeout(input._storedQueryTimer);
-    input._storedQueryTimer = window.setTimeout(search, 180);
-  });
+  function moveActiveResult(delta) {
+    var buttons = selectableResultButtons();
+    if (!buttons.length) {
+      return false;
+    }
+    var nextIndex = activeResultIndex;
+    if (nextIndex === -1) {
+      nextIndex = delta > 0 ? 0 : buttons.length - 1;
+    } else {
+      nextIndex += delta;
+      if (nextIndex < 0) {
+        nextIndex = buttons.length - 1;
+      } else if (nextIndex >= buttons.length) {
+        nextIndex = 0;
+      }
+    }
+    setActiveResult(nextIndex);
+    return true;
+  }
 
-  results.addEventListener("click", function(event) {
-    var button = event.target.closest("button[data-query-key]");
-    if (!button) {
-      return;
+  function selectResultButton(button) {
+    if (!button || button.disabled) {
+      return false;
     }
     var parameters = [];
     try {
@@ -171,6 +162,139 @@
     input.value = "";
     hideResults();
     input.focus();
+    return true;
+  }
+
+  function selectActiveResult() {
+    var button = selectableResultButtons()[activeResultIndex];
+    return selectResultButton(button);
+  }
+
+  function renderResults(queries, emptyMessage) {
+    results.textContent = "";
+    if (!queries.length) {
+      var empty = document.createElement("p");
+      empty.textContent = emptyMessage || "No matching stored queries";
+      results.appendChild(empty);
+      results.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      setActiveResult(-1);
+      return;
+    }
+    queries.forEach(function(query, index) {
+      var key = query.database + "/" + query.name;
+      var button = document.createElement("button");
+      button.id = "stored-query-result-" + index;
+      button.type = "button";
+      button.disabled = selected.has(key);
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", "false");
+      button.setAttribute("data-query-key", key);
+      button.setAttribute("data-query-label", query.title || key);
+      button.setAttribute("data-query-description", query.description || "");
+      button.setAttribute("data-query-parameters", JSON.stringify(query.parameters || query.params || []));
+      button.setAttribute("data-query-is-write", query.is_write ? "1" : "0");
+      var title = document.createElement("strong");
+      title.textContent = query.title || query.name;
+      var meta = document.createElement("span");
+      meta.textContent = key + (query.is_write ? " - writable" : "");
+      button.appendChild(title);
+      button.appendChild(meta);
+      results.appendChild(button);
+    });
+    results.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    setActiveResult(-1);
+  }
+
+  async function fetchResults(url, emptyMessage) {
+    if (pendingController) {
+      pendingController.abort();
+    }
+    var requestId = ++requestSerial;
+    pendingController = new AbortController();
+    try {
+      var response = await fetch(url, {
+        credentials: "same-origin",
+        signal: pendingController.signal
+      });
+      if (!response.ok) {
+        throw new Error("Search failed");
+      }
+      var json = await response.json();
+      if (requestId === requestSerial) {
+        renderResults(json.queries || [], emptyMessage);
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        results.textContent = "Stored query search failed";
+        results.hidden = false;
+        input.setAttribute("aria-expanded", "true");
+        setActiveResult(-1);
+      }
+    }
+  }
+
+  function loadRecent() {
+    if (!recentUrl) {
+      hideResults();
+      return;
+    }
+    fetchResults(recentUrl, "No stored queries yet");
+  }
+
+  function search() {
+    var q = input.value.trim();
+    if (!q) {
+      loadRecent();
+      return;
+    }
+    fetchResults(
+      searchUrl + "?q=" + encodeURIComponent(q),
+      "No matching stored queries"
+    );
+  }
+
+  function showResultsForCurrentInput() {
+    if (input.value.trim()) {
+      search();
+    } else {
+      loadRecent();
+    }
+  }
+
+  input.addEventListener("focus", showResultsForCurrentInput);
+  input.addEventListener("click", showResultsForCurrentInput);
+
+  input.addEventListener("input", function() {
+    window.clearTimeout(input._storedQueryTimer);
+    input._storedQueryTimer = window.setTimeout(search, 180);
+  });
+
+  input.addEventListener("keydown", function(event) {
+    if (event.key === "ArrowDown") {
+      if (moveActiveResult(1)) {
+        event.preventDefault();
+      }
+    } else if (event.key === "ArrowUp") {
+      if (moveActiveResult(-1)) {
+        event.preventDefault();
+      }
+    } else if (event.key === "Enter") {
+      if (activeResultIndex !== -1 && selectActiveResult()) {
+        event.preventDefault();
+      }
+    } else if (event.key === "Escape") {
+      hideResults();
+    }
+  });
+
+  results.addEventListener("click", function(event) {
+    var button = event.target.closest("button[data-query-key]");
+    if (!button) {
+      return;
+    }
+    selectResultButton(button);
   });
 
   list.addEventListener("click", function(event) {

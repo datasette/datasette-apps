@@ -14,6 +14,7 @@ from .views import (
     edit_app,
     launch_app,
     pin_app,
+    recent_stored_queries,
     top_homepage_html,
     unpin_app,
     view_app,
@@ -27,6 +28,7 @@ def register_routes():
     return [
         (r"^/-/apps$", apps_index),
         (r"^/-/apps/create$", create_app),
+        (r"^/-/apps/recent-queries\.json$", recent_stored_queries),
         (r"^/-/apps/(?P<id>[^/]+)\.json$", app_json),
         (r"^/-/apps/(?P<id>[^/]+)/revisions/(?P<version>\d+)$", app_revision),
         (r"^/-/apps/(?P<id>[^/]+)/edit$", edit_app),

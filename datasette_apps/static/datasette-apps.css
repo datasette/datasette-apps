@@ -519,7 +519,8 @@
 }
 
 .datasette-app-stored-query-results button:hover,
-.datasette-app-stored-query-results button:focus {
+.datasette-app-stored-query-results button:focus,
+.datasette-app-stored-query-results button.datasette-app-stored-query-active {
   background: #f4f8fb;
 }
 

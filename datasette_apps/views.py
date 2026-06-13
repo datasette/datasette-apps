@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from datasette import Forbidden, NotFound, Response
 from datasette.resources import DatabaseResource, QueryResource, TableResource
+from datasette.stored_queries import query_row_to_stored_query, stored_query_to_dict
 
 from .csp import (
     APP_VIEW_PARENT_CSP,
@@ -71,6 +72,37 @@ window.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 """
+
+
+async def recent_stored_queries(datasette, request):
+    allowed_sql, allowed_params = await datasette.allowed_resources_sql(
+        action="view-query",
+        actor=request.actor,
+    )
+    rows = list(
+        (
+            await datasette.get_internal_database().execute(
+                """
+                SELECT q.*
+                FROM queries q
+                JOIN (
+                    {allowed_sql}
+                ) allowed
+                  ON allowed.parent = q.database_name
+                 AND allowed.child = q.name
+                ORDER BY q.created_at DESC, q.database_name, q.name
+                LIMIT 3
+                """.format(allowed_sql=allowed_sql),
+                allowed_params,
+            )
+        ).rows
+    )
+    queries = []
+    for row in rows:
+        query = query_row_to_stored_query(row)
+        if query is not None:
+            queries.append(stored_query_to_dict(query))
+    return Response.json({"queries": queries})
 
 
 def _readonly_codemirror_assets(textarea_selector):
@@ -357,6 +389,9 @@ async def create_app(datasette, request):
                     ),
                     "stored_query_options": [],
                     "query_search_url": datasette.urls.path("/-/queries.json"),
+                    "recent_query_url": datasette.urls.path(
+                        "/-/apps/recent-queries.json"
+                    ),
                     "codemirror_assets": _codemirror_assets(),
                     **(await _csp_form_context(datasette, actor)),
                 },
@@ -474,6 +509,9 @@ async def edit_app(datasette, request):
                         datasette, stored_queries
                     ),
                     "query_search_url": datasette.urls.path("/-/queries.json"),
+                    "recent_query_url": datasette.urls.path(
+                        "/-/apps/recent-queries.json"
+                    ),
                     "csp_origins": csp_origins,
                     "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
                     "codemirror_assets": _codemirror_assets(),
