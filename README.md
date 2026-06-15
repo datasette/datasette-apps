@@ -105,7 +105,13 @@ The create and edit pages use Datasette's existing bundled CodeMirror editor for
 
 The edit page includes a private checkbox, SQL query database access, stored query access, and allowed network origins. The network origins control is a free-form list for users with the `apps-set-csp` permission, a set of checkboxes when an `allowed_csp_origins` allow-list is configured, and hidden otherwise.
 
-Plugins can add their own apps to the central catalog during startup:
+### External apps from plugins
+
+Datasette plugins can register their own apps that are independent of the HTML sandbox system. This allows apps with more complex requirements to still participate in other features built around the app registry.
+
+Apps that are not stored as HTML are called **external apps**. They can be added and removed using the `Registry` class.
+
+This example registers an additional app on startup:
 
 ```python
 from datasette import hookimpl
@@ -123,7 +129,7 @@ async def startup(datasette):
     )
 ```
 
-Plugins can remove a single external app from the catalog by ID:
+Here's how to remove a single external app from the catalog by ID:
 
 ```python
 await Registry(datasette).remove_app("myplugin:example")
