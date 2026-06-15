@@ -63,8 +63,7 @@ def register_app_actions():
 
 
 def app_permission_sql(actor, action):
-    # Owners can do anything to their apps.
-    # Private apps are invisible to all but their owners.
+    # Owners can do anything to their stored apps.
     actor_id = actor.get("id") if actor else None
     if action not in {"view-app", "edit-app", "delete-app", "manage-app-access"}:
         return None
@@ -86,31 +85,26 @@ def app_permission_sql(actor, action):
       AND external = 0 -- It's a stored HTML app, not an external app
       AND deleted_at IS NULL
     """
-    if action == "view-app":
-        # view-app is restricted to non-private apps or user-owned apps
-        restriction_sql = """
-        SELECT 'apps' AS parent,
-               id AS child
-        FROM apps
-        WHERE deleted_at IS NULL
-          AND (is_private = 0
-               OR (
-                   actor_id = :actor_id
-                   AND :actor_id IS NOT NULL
-                   AND external = 0
-               ))
-        """
-    else:
-        # edit/delete/manage permissions are restricted to the owner of the app
-        restriction_sql = """
-        SELECT 'apps' AS parent,
-            id AS child
-        FROM apps
-        WHERE actor_id = :actor_id
-        AND :actor_id IS NOT NULL
-        AND external = 0
-        AND deleted_at IS NULL
-        """
+    # restriction_sql defines the resources that configured Datasette grants
+    # are allowed to apply to. The privacy rule is the same for every app
+    # action: a private app is only in that set for its owner.
+    #
+    # The only action-specific difference is that view-app can include
+    # non-private external apps, while edit/delete/manage only apply to stored
+    # apps.
+    stored_apps_only = "\n          AND external = 0" if action != "view-app" else ""
+    restriction_sql = f"""
+    SELECT 'apps' AS parent,
+           id AS child
+    FROM apps
+    WHERE deleted_at IS NULL{stored_apps_only}
+      AND (is_private = 0
+           OR (
+               actor_id = :actor_id
+               AND :actor_id IS NOT NULL
+               AND external = 0
+           ))
+    """
     return PermissionSQL(
         source="datasette-apps",
         sql=sql,

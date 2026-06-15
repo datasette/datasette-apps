@@ -230,17 +230,19 @@ async def test_anonymous_can_view_non_private_app_if_permission_allows():
 
 
 @pytest.mark.asyncio
-async def test_edit_app_is_owner_only_even_with_permission_grant():
+async def test_edit_app_can_be_granted_to_non_owner_for_non_private_app():
     datasette = Datasette(
         memory=True,
         config={"permissions": {"edit-app": {"id": "*"}}},
     )
-    app = await Registry(datasette).create_stored_app(
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
         actor_id="alice",
         name="Owned",
         description="",
         html="",
     )
+    await registry.set_access_mode(app["id"], "not-private")
     await datasette.invoke_startup()
 
     assert await datasette.allowed(
@@ -248,11 +250,59 @@ async def test_edit_app_is_owner_only_even_with_permission_grant():
         resource=AppResource(app["id"]),
         actor={"id": "alice"},
     )
-    assert not await datasette.allowed(
+    assert await datasette.allowed(
         action="edit-app",
         resource=AppResource(app["id"]),
         actor={"id": "bob"},
     )
+
+    response = await datasette.client.get(
+        f"/-/apps/{app['id']}/edit", actor={"id": "bob"}
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_private_app_edit_delete_and_manage_access_remain_owner_only():
+    datasette = Datasette(
+        memory=True,
+        config={
+            "permissions": {
+                "edit-app": {"id": "*"},
+                "delete-app": {"id": "*"},
+                "manage-app-access": {"id": "*"},
+            }
+        },
+    )
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice",
+        name="Private",
+        description="",
+        html="",
+    )
+    await datasette.invoke_startup()
+
+    for action in ("edit-app", "delete-app", "manage-app-access"):
+        assert await datasette.allowed(
+            action=action,
+            resource=AppResource(app["id"]),
+            actor={"id": "alice"},
+        )
+        assert not await datasette.allowed(
+            action=action,
+            resource=AppResource(app["id"]),
+            actor={"id": "bob"},
+        )
+
+    edit = await datasette.client.get(
+        f"/-/apps/{app['id']}/edit", actor={"id": "bob"}
+    )
+    assert edit.status_code == 403
+
+    delete = await datasette.client.get(
+        f"/-/apps/{app['id']}/delete", actor={"id": "bob"}
+    )
+    assert delete.status_code == 403
 
 
 @pytest.mark.asyncio
