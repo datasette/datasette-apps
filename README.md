@@ -108,7 +108,7 @@ Stored apps support per-user sharing, built on [datasette-acl](https://github.co
 - Apps register **Viewer** (`view-app`), **Editor** (`view-app`, `edit-app`) and **Manager** (everything, including `manage-app-access` and `delete-app`) roles with datasette-acl.
 - Creating an app grants its creator the Manager role; existing apps are backfilled with owner grants once at startup.
 - App pages show a **Share** button to managers, opening the datasette-acl-share dialog to grant other users (or groups, or everyone) access.
-- The private checkbox maps onto a `_signed_in` wildcard Viewer grant: marking an app "not private" lets any signed-in actor view it; marking it private revokes that wildcard grant (per-user grants are unaffected).
+- The private checkbox maps onto a Viewer grant for the `authenticated` public audience: marking an app "not private" lets any signed-in actor view it; marking it private revokes that audience grant (per-user grants are unaffected).
 
 Signed-in users can pin apps from the catalog and from individual stored app pages. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
 

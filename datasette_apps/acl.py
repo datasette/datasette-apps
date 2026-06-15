@@ -6,17 +6,18 @@ dependencies; acl grants are the source of truth for per-app access.
 The mapping between the legacy model and acl grants:
 
     app owner (actor_id)    -> Manager role grant on the app
-    is_private = 0          -> Viewer role grant for the ``_signed_in``
-                               wildcard principal ("anyone signed in")
-    is_private = 1          -> no wildcard grant
+    is_private = 0          -> Viewer role grant for the ``authenticated``
+                               public audience ("anyone signed in")
+    is_private = 1          -> no audience grant
 
 ``is_private`` stays as the UI toggle; flipping it grants/revokes the
-wildcard. The share dialog can layer further per-actor grants on top.
+``authenticated`` audience. The share dialog can layer further per-actor
+grants on top.
 """
 
 from __future__ import annotations
 
-from datasette_acl.grants import grant as _grant, revoke as _revoke
+from datasette_acl.grants import Principal, grant as _grant, revoke as _revoke
 from datasette_acl.internal_migrations import (
     internal_migrations as _acl_internal_migrations,
 )
@@ -27,7 +28,8 @@ from datasette_acl_share import datasette_share_assets
 
 APP_RESOURCE_TYPE = "app"
 APPS_PARENT = "apps"
-GENERAL_PRINCIPAL = "_signed_in"
+# "Anyone signed in" maps to acl's first-class ``authenticated`` audience.
+GENERAL_PRINCIPAL = Principal.authenticated()
 
 _MIGRATION_TABLE = "_datasette_apps_acl_migration"
 _MIGRATION_KEY = "grants-backfill-v1"
@@ -68,14 +70,14 @@ async def seed_owner_manager_grant(datasette, app_id, owner_actor_id):
         APP_RESOURCE_TYPE,
         APPS_PARENT,
         str(app_id),
-        actor_id=str(owner_actor_id),
+        principal=Principal.actor(str(owner_actor_id)),
         role="Manager",
         by_actor=str(owner_actor_id),
     )
 
 
 async def sync_general_access_grant(datasette, app_id, is_private, by_actor=None):
-    """Mirror the is_private toggle onto the ``_signed_in`` wildcard grant."""
+    """Mirror the is_private toggle onto the ``authenticated`` audience grant."""
     if not _acl_ready(datasette):
         return
     by_actor = str(by_actor) if by_actor else None
@@ -85,7 +87,7 @@ async def sync_general_access_grant(datasette, app_id, is_private, by_actor=None
             APP_RESOURCE_TYPE,
             APPS_PARENT,
             str(app_id),
-            actor_id=GENERAL_PRINCIPAL,
+            principal=GENERAL_PRINCIPAL,
             by_actor=by_actor,
         )
     else:
@@ -94,7 +96,7 @@ async def sync_general_access_grant(datasette, app_id, is_private, by_actor=None
             APP_RESOURCE_TYPE,
             APPS_PARENT,
             str(app_id),
-            actor_id=GENERAL_PRINCIPAL,
+            principal=GENERAL_PRINCIPAL,
             role="Viewer",
             by_actor=by_actor,
         )
@@ -143,11 +145,11 @@ async def backfill_acl_grants(datasette, *, force=False):
     """One-time backfill of pre-acl apps into acl grants.
 
     For every live stored app: owner -> Manager grant, and is_private=0 ->
-    ``_signed_in`` Viewer grant. External apps are skipped (no owner; their
+    ``authenticated`` Viewer grant. External apps are skipped (no owner; their
     visibility stays config-driven). Doubly idempotent: a marker row
     short-circuits reruns, and grant() only inserts missing actions.
     """
-    stats = {"owners": 0, "wildcards": 0, "skipped": False}
+    stats = {"owners": 0, "audiences": 0, "skipped": False}
     db = datasette.get_internal_database()
     await _ensure_acl_tables(db)
     if not await _ensure_app_roles_registry(datasette):
@@ -179,7 +181,7 @@ async def backfill_acl_grants(datasette, *, force=False):
                 APP_RESOURCE_TYPE,
                 APPS_PARENT,
                 str(row["id"]),
-                actor_id=str(row["actor_id"]),
+                principal=Principal.actor(str(row["actor_id"])),
                 role="Manager",
                 by_actor=str(row["actor_id"]),
             )
@@ -190,11 +192,11 @@ async def backfill_acl_grants(datasette, *, force=False):
                 APP_RESOURCE_TYPE,
                 APPS_PARENT,
                 str(row["id"]),
-                actor_id=GENERAL_PRINCIPAL,
+                principal=GENERAL_PRINCIPAL,
                 role="Viewer",
                 by_actor=None,
             )
-            stats["wildcards"] += 1
+            stats["audiences"] += 1
     await db.execute_write(
         f"INSERT OR IGNORE INTO {_MIGRATION_TABLE} (key, migrated_at) "
         "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",

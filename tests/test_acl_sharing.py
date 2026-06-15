@@ -2,7 +2,7 @@
 
 import pytest
 from datasette.app import Datasette
-from datasette_acl.grants import grant, list_grants, revoke
+from datasette_acl.grants import Principal, grant, list_grants, revoke
 
 from datasette_apps import Registry
 from datasette_apps import acl as apps_acl
@@ -31,7 +31,14 @@ async def create_app(datasette, actor_id="alice", **kwargs):
 
 def actor_grant(grants, actor_id):
     for entry in grants:
-        if entry["actor_id"] == actor_id:
+        if entry["principal"] == "actor" and entry["actor_id"] == actor_id:
+            return entry
+    return None
+
+
+def audience_grant(grants, principal_type):
+    for entry in grants:
+        if entry["principal"] == principal_type:
             return entry
     return None
 
@@ -66,13 +73,13 @@ async def test_viewer_grant_allows_view_only_and_revoke_removes_access():
     assert not await allowed(datasette, "view-app", app["id"], BOB)
 
     await grant(
-        datasette, "app", "apps", app["id"], actor_id="bob", role="Viewer", by_actor="alice"
+        datasette, "app", "apps", app["id"], principal=Principal.actor("bob"), role="Viewer", by_actor="alice"
     )
     assert await allowed(datasette, "view-app", app["id"], BOB)
     assert not await allowed(datasette, "edit-app", app["id"], BOB)
     assert not await allowed(datasette, "manage-app-access", app["id"], BOB)
 
-    await revoke(datasette, "app", "apps", app["id"], actor_id="bob", by_actor="alice")
+    await revoke(datasette, "app", "apps", app["id"], principal=Principal.actor("bob"), by_actor="alice")
     assert not await allowed(datasette, "view-app", app["id"], BOB)
 
 
@@ -81,7 +88,7 @@ async def test_editor_grant_allows_edit_but_not_manage():
     datasette = await started_datasette()
     app = await create_app(datasette)
     await grant(
-        datasette, "app", "apps", app["id"], actor_id="bob", role="Editor", by_actor="alice"
+        datasette, "app", "apps", app["id"], principal=Principal.actor("bob"), role="Editor", by_actor="alice"
     )
 
     assert await allowed(datasette, "edit-app", app["id"], BOB)
@@ -98,7 +105,7 @@ async def test_acl_api_recognizes_apps_and_gates_on_manage():
     datasette = await started_datasette()
     app = await create_app(datasette)
     await grant(
-        datasette, "app", "apps", app["id"], actor_id="bob", role="Editor", by_actor="alice"
+        datasette, "app", "apps", app["id"], principal=Principal.actor("bob"), role="Editor", by_actor="alice"
     )
 
     owner = await datasette.client.get(
@@ -116,7 +123,7 @@ async def test_acl_api_recognizes_apps_and_gates_on_manage():
 
 
 @pytest.mark.asyncio
-async def test_access_mode_toggle_syncs_signed_in_wildcard_grant():
+async def test_access_mode_toggle_syncs_authenticated_audience_grant():
     datasette = await started_datasette()
     registry = Registry(datasette)
     app = await create_app(datasette)
@@ -127,16 +134,16 @@ async def test_access_mode_toggle_syncs_signed_in_wildcard_grant():
     assert await allowed(datasette, "view-app", app["id"], CAROL)
     assert not await allowed(datasette, "view-app", app["id"], None)
     grants = await list_grants(datasette, "app", "apps", app["id"])
-    assert actor_grant(grants, "_signed_in")["actions"] == ["view-app"]
+    assert audience_grant(grants, "authenticated")["actions"] == ["view-app"]
 
     await registry.set_access_mode(app["id"], "private", actor_id="alice")
     assert not await allowed(datasette, "view-app", app["id"], CAROL)
     grants = await list_grants(datasette, "app", "apps", app["id"])
-    assert actor_grant(grants, "_signed_in") is None
+    assert audience_grant(grants, "authenticated") is None
 
 
 @pytest.mark.asyncio
-async def test_update_stored_app_is_private_change_syncs_wildcard_grant():
+async def test_update_stored_app_is_private_change_syncs_audience_grant():
     datasette = await started_datasette()
     registry = Registry(datasette)
     app = await create_app(datasette)
@@ -187,7 +194,7 @@ async def test_startup_backfills_grants_for_pre_acl_apps():
 
     # Marker guards reruns
     stats = await apps_acl.backfill_acl_grants(datasette)
-    assert stats == {"owners": 0, "wildcards": 0, "skipped": True}
+    assert stats == {"owners": 0, "audiences": 0, "skipped": True}
 
 
 @pytest.mark.asyncio
@@ -196,7 +203,7 @@ async def test_revoked_grants_do_not_apply_to_deleted_apps():
     registry = Registry(datasette)
     app = await create_app(datasette)
     await grant(
-        datasette, "app", "apps", app["id"], actor_id="bob", role="Viewer", by_actor="alice"
+        datasette, "app", "apps", app["id"], principal=Principal.actor("bob"), role="Viewer", by_actor="alice"
     )
 
     await registry.delete_stored_app(app["id"], actor_id="alice")
@@ -210,7 +217,7 @@ async def test_share_trigger_rendered_for_managers_only():
     datasette = await started_datasette()
     app = await create_app(datasette)
     await grant(
-        datasette, "app", "apps", app["id"], actor_id="bob", role="Editor", by_actor="alice"
+        datasette, "app", "apps", app["id"], principal=Principal.actor("bob"), role="Editor", by_actor="alice"
     )
 
     owner = await datasette.client.get(f"/-/apps/{app['id']}", actor=ALICE)
@@ -232,7 +239,7 @@ async def test_shared_app_appears_in_catalog():
     assert "Catalog app" not in before.text
 
     await grant(
-        datasette, "app", "apps", app["id"], actor_id="bob", role="Viewer", by_actor="alice"
+        datasette, "app", "apps", app["id"], principal=Principal.actor("bob"), role="Viewer", by_actor="alice"
     )
     after = await datasette.client.get("/-/apps", actor=BOB)
     assert "Catalog app" in after.text

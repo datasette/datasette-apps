@@ -77,8 +77,9 @@ def register_app_actions():
 # UNIONed into restriction_sql below so datasette-acl grants pass the
 # owner-only / private restriction filter that would otherwise exclude them.
 # Mirrors the principal matching in datasette-acl's own permission hook
-# (wildcards, direct actor grants, live group membership). The :action and
-# :actor_id params are populated by datasette core for every PermissionSQL.
+# (public audiences keyed by principal_type, direct actor grants, live group
+# membership). The :action and :actor_id params are populated by datasette
+# core for every PermissionSQL.
 _ACL_GRANTS_RESTRICTION_SQL = """
     SELECT ar.parent AS parent,
            ar.child AS child
@@ -90,18 +91,19 @@ _ACL_GRANTS_RESTRICTION_SQL = """
       AND ar.resource_type = 'app'
       AND ar.child IN (SELECT id FROM apps WHERE deleted_at IS NULL)
       AND (
-        acl.actor_id = '*'
-        OR (:actor_id IS NOT NULL AND acl.actor_id = :actor_id)
-        OR (:actor_id IS NOT NULL AND acl.actor_id = '_signed_in')
-        OR (:actor_id IS NULL AND acl.actor_id = '_anonymous')
-        OR acl.group_id IN (
+        acl.principal_type = 'everyone'
+        OR (:actor_id IS NOT NULL
+            AND acl.principal_type = 'actor' AND acl.actor_id = :actor_id)
+        OR (:actor_id IS NOT NULL AND acl.principal_type = 'authenticated')
+        OR (:actor_id IS NULL AND acl.principal_type = 'anonymous')
+        OR (acl.principal_type = 'group' AND acl.group_id IN (
             SELECT ag.group_id
             FROM acl_actor_groups ag
             JOIN acl_groups ig ON ag.group_id = ig.id
             WHERE :actor_id IS NOT NULL
               AND ag.actor_id = :actor_id
               AND ig.deleted IS NULL
-        )
+        ))
       )
       AND (acl.group_id IS NULL OR g.deleted IS NULL)
 """

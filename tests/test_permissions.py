@@ -141,7 +141,7 @@ async def test_actors_with_view_app_can_view_external_apps():
 @pytest.mark.asyncio
 async def test_non_private_app_viewable_by_signed_in_actors():
     # With datasette-acl installed, "not private" maps to a Viewer grant for
-    # the _signed_in wildcard principal: any signed-in actor can view, no
+    # the "authenticated" public audience: any signed-in actor can view, no
     # instance-level view-app configuration required. Anonymous actors still
     # need an explicit config grant.
     datasette = Datasette(memory=True)
