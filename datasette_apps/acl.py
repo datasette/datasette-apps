@@ -21,7 +21,7 @@ from datasette_acl.grants import Principal, grant as _grant, revoke as _revoke
 from datasette_acl.internal_migrations import (
     internal_migrations as _acl_internal_migrations,
 )
-from datasette_acl.roles import build_roles_registry, standard_roles
+from datasette_acl.roles import standard_roles
 from sqlite_utils import Database as _SqliteUtilsDatabase
 
 from datasette_acl_share import datasette_share_assets
@@ -55,15 +55,18 @@ def app_acl_roles():
     )
 
 
-def _acl_ready(datasette):
-    # grant(role=...) resolves names against the registry that acl's own
-    # startup hook builds; before startup seeding must no-op.
-    return getattr(datasette, "_acl_roles_registry", None) is not None
+async def _acl_ready(datasette):
+    # grant()/revoke() write into acl's tables; those don't exist until acl's
+    # startup applies its migrations. Seeding driven by registry operations
+    # that run before then must no-op and rely on the startup backfill. Role
+    # names resolve on demand via the datasette_acl_roles hook, so there is no
+    # registry to prime — table existence is the only prerequisite.
+    return await _acl_tables_present(datasette.get_internal_database())
 
 
 async def seed_owner_manager_grant(datasette, app_id, owner_actor_id):
     """Grant the app creator the Manager role. No-op for anonymous creators."""
-    if not owner_actor_id or not _acl_ready(datasette):
+    if not owner_actor_id or not await _acl_ready(datasette):
         return
     await _grant(
         datasette,
@@ -78,7 +81,7 @@ async def seed_owner_manager_grant(datasette, app_id, owner_actor_id):
 
 async def sync_general_access_grant(datasette, app_id, is_private, by_actor=None):
     """Mirror the is_private toggle onto the ``authenticated`` audience grant."""
-    if not _acl_ready(datasette):
+    if not await _acl_ready(datasette):
         return
     by_actor = str(by_actor) if by_actor else None
     if is_private:
@@ -102,6 +105,16 @@ async def sync_general_access_grant(datasette, app_id, is_private, by_actor=None
         )
 
 
+async def _acl_tables_present(db):
+    return bool(
+        (
+            await db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'acl_resources'"
+            )
+        ).rows
+    )
+
+
 async def _ensure_acl_tables(db):
     """Apply acl's schema migrations if its tables don't exist yet.
 
@@ -111,34 +124,13 @@ async def _ensure_acl_tables(db):
     (sqlite-migrate tracks applied ones), so applying them here is safe —
     acl's own startup re-applying them later is a no-op.
     """
-    present = bool(
-        (
-            await db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'acl_resources'"
-            )
-        ).rows
-    )
-    if present:
+    if await _acl_tables_present(db):
         return
 
     def apply_migrations(connection):
         _acl_internal_migrations.apply(_SqliteUtilsDatabase(connection))
 
     await db.execute_write_fn(apply_migrations)
-
-
-async def _ensure_app_roles_registry(datasette):
-    """Make sure acl's roles registry knows the ``app`` roles.
-
-    The backfill runs from this plugin's ``startup`` hook and the relative
-    ordering of two plugins' startup hooks is not guaranteed; if ours runs
-    first the registry is missing and grant(role=...) would raise. Rebuilding
-    is cheap and idempotent.
-    """
-    registry = getattr(datasette, "_acl_roles_registry", None)
-    if not registry or APP_RESOURCE_TYPE not in registry:
-        datasette._acl_roles_registry = await build_roles_registry(datasette)
-    return APP_RESOURCE_TYPE in (getattr(datasette, "_acl_roles_registry", None) or {})
 
 
 async def backfill_acl_grants(datasette, *, force=False):
@@ -152,9 +144,6 @@ async def backfill_acl_grants(datasette, *, force=False):
     stats = {"owners": 0, "audiences": 0, "skipped": False}
     db = datasette.get_internal_database()
     await _ensure_acl_tables(db)
-    if not await _ensure_app_roles_registry(datasette):
-        stats["skipped"] = True
-        return stats
     await db.execute_write(
         f"CREATE TABLE IF NOT EXISTS {_MIGRATION_TABLE} "
         "(key TEXT PRIMARY KEY, migrated_at TEXT NOT NULL)"
