@@ -66,7 +66,48 @@ async def test_owner_can_delete_stored_app_until_it_is_deleted():
 
 
 @pytest.mark.asyncio
-async def test_actors_with_view_app_can_create_and_view_external_apps():
+async def test_create_app_requires_explicit_permission_grant():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+
+    assert not await datasette.allowed(
+        action="create-app",
+        resource=AppsResource(),
+        actor={"id": "alice"},
+    )
+
+    response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
+    assert response.status_code == 403
+
+    index = await datasette.client.get("/-/apps", actor={"id": "alice"})
+    assert 'href="/-/apps/create"' not in index.text
+
+
+@pytest.mark.asyncio
+async def test_create_app_allows_explicit_permission_grant():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
+    await datasette.invoke_startup()
+
+    assert await datasette.allowed(
+        action="create-app",
+        resource=AppsResource(),
+        actor={"id": "alice"},
+    )
+    assert not await datasette.allowed(
+        action="create-app",
+        resource=AppsResource(),
+        actor={"id": "bob"},
+    )
+
+    response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_actors_with_view_app_can_view_external_apps():
     datasette = Datasette(
         memory=True,
         config={"permissions": {"view-app": {"id": "*"}}},
@@ -80,7 +121,7 @@ async def test_actors_with_view_app_can_create_and_view_external_apps():
     )
     await datasette.invoke_startup()
 
-    assert await datasette.allowed(
+    assert not await datasette.allowed(
         action="create-app",
         resource=AppsResource(),
         actor={"id": "alice"},

@@ -25,7 +25,10 @@ def create_database(tmp_path):
 
 @pytest.mark.asyncio
 async def test_create_page_includes_copyable_llm_prompt_with_schema(tmp_path):
-    datasette = Datasette([str(create_database(tmp_path))])
+    datasette = Datasette(
+        [str(create_database(tmp_path))],
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
     await datasette.invoke_startup()
     await datasette.add_query(
         "content",
@@ -158,7 +161,11 @@ async def test_edit_page_prompt_has_selected_stored_query_metadata(tmp_path):
 
 @pytest.mark.asyncio
 async def test_create_page_prompt_does_not_leak_hidden_schema(tmp_path):
-    datasette = Datasette([str(create_database(tmp_path))], default_deny=True)
+    datasette = Datasette(
+        [str(create_database(tmp_path))],
+        default_deny=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
 
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
 

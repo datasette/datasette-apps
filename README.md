@@ -73,6 +73,14 @@ Stored query access is configured using a picker on the create and edit pages. T
 
 The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, `delete-app`, `manage-app-access`, and `apps-set-csp`. Stored app owners can always view, edit, delete, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
 
+Creating stored apps requires an explicit `create-app` permission grant. To grant that to all signed-in users:
+
+```yaml
+permissions:
+  create-app:
+    id: "*"
+```
+
 The `apps-set-csp` permission controls who can set arbitrary CSP origins on an app - see [Sandboxed apps](#sandboxed-apps). Nobody has it by default. To grant it to a specific user:
 
 ```yaml

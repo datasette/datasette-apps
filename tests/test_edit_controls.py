@@ -26,7 +26,12 @@ def create_table_preview_database(tmp_path):
 async def test_create_form_shows_access_data_and_network_controls():
     datasette = Datasette(
         memory=True,
-        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+        config={
+            "permissions": {
+                "apps-set-csp": {"id": "alice"},
+                "create-app": {"id": "alice"},
+            }
+        },
     )
 
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
@@ -87,6 +92,7 @@ async def test_create_form_saves_access_data_and_network_controls():
         memory=True,
         config={
             "permissions": {
+                "create-app": {"id": "alice"},
                 "view-app": {"id": "*"},
                 "apps-set-csp": {"id": "alice"},
             }
@@ -186,7 +192,10 @@ async def test_edit_form_shows_access_data_network_and_capability_controls():
 
 @pytest.mark.asyncio
 async def test_create_form_shows_database_link_and_table_preview(tmp_path):
-    datasette = Datasette([str(create_table_preview_database(tmp_path))])
+    datasette = Datasette(
+        [str(create_table_preview_database(tmp_path))],
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
 
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
 
@@ -364,7 +373,10 @@ CSP_ALLOWLIST_CONFIG = {
 
 @pytest.mark.asyncio
 async def test_create_form_hides_network_access_without_permission_or_allowlist():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
 
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
 
@@ -375,7 +387,13 @@ async def test_create_form_hides_network_access_without_permission_or_allowlist(
 
 @pytest.mark.asyncio
 async def test_create_form_shows_allowlist_checkboxes_without_permission():
-    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+    datasette = Datasette(
+        memory=True,
+        config={
+            **CSP_ALLOWLIST_CONFIG,
+            "permissions": {"create-app": {"id": "alice"}},
+        },
+    )
 
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
 
@@ -394,7 +412,12 @@ async def test_create_form_shows_allowlist_checkboxes_without_permission():
 async def test_create_form_shows_textarea_with_apps_set_csp_permission():
     datasette = Datasette(
         memory=True,
-        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+        config={
+            "permissions": {
+                "apps-set-csp": {"id": "alice"},
+                "create-app": {"id": "alice"},
+            }
+        },
     )
 
     response = await datasette.client.get("/-/apps/create", actor={"id": "alice"})
@@ -406,7 +429,13 @@ async def test_create_form_shows_textarea_with_apps_set_csp_permission():
 
 @pytest.mark.asyncio
 async def test_create_post_rejects_origin_not_on_allowlist():
-    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+    datasette = Datasette(
+        memory=True,
+        config={
+            **CSP_ALLOWLIST_CONFIG,
+            "permissions": {"create-app": {"id": "alice"}},
+        },
+    )
 
     response = await datasette.client.post(
         "/-/apps/create",
@@ -425,7 +454,13 @@ async def test_create_post_rejects_origin_not_on_allowlist():
 
 @pytest.mark.asyncio
 async def test_create_post_accepts_allowlisted_origin():
-    datasette = Datasette(memory=True, config=CSP_ALLOWLIST_CONFIG)
+    datasette = Datasette(
+        memory=True,
+        config={
+            **CSP_ALLOWLIST_CONFIG,
+            "permissions": {"create-app": {"id": "alice"}},
+        },
+    )
     registry = Registry(datasette)
 
     response = await datasette.client.post(
@@ -447,7 +482,10 @@ async def test_create_post_accepts_allowlisted_origin():
 
 @pytest.mark.asyncio
 async def test_create_post_rejects_arbitrary_origin_without_allowlist():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
 
     response = await datasette.client.post(
         "/-/apps/create",

@@ -21,7 +21,10 @@ async def assert_extends_datasette_base(response):
 
 @pytest.mark.asyncio
 async def test_app_pages_extend_datasette_base_template():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
     app = await Registry(datasette).create_stored_app(
         actor_id="alice",
         name="Template app",
@@ -50,7 +53,10 @@ async def test_app_pages_extend_datasette_base_template():
 
 @pytest.mark.asyncio
 async def test_app_pages_show_breadcrumbs_to_apps_list():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
     app = await Registry(datasette).create_stored_app(
         actor_id="alice",
         name="Crumb app",
@@ -81,7 +87,11 @@ async def test_app_pages_show_breadcrumbs_to_apps_list():
 
 @pytest.mark.asyncio
 async def test_app_links_respect_base_url():
-    datasette = Datasette(memory=True, settings={"base_url": "/prefix/"})
+    datasette = Datasette(
+        memory=True,
+        settings={"base_url": "/prefix/"},
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
     app = await Registry(datasette).create_stored_app(
         actor_id="alice",
         name="Base URL app",
