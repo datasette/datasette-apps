@@ -1,6 +1,6 @@
 [project]
 name = "datasette-apps"
-version = "0.1a1"
+version = "0.1a2"
 description = "Create apps that live inside Datasette"
 readme = "README.md"
 authors = [{name = "Simon Willison"}]
