@@ -63,23 +63,13 @@ def register_app_actions():
 
 
 def app_permission_sql(actor, action):
+    # Owners can do anything to their apps.
+    # Private apps are invisible to all but their owners.
     actor_id = actor.get("id") if actor else None
-    if action == "create-app":
-        return PermissionSQL(
-            source="datasette-apps",
-            sql="""
-            SELECT 'apps' AS parent,
-                   NULL AS child,
-                   1 AS allow,
-                   'Signed-in actors can create apps' AS reason
-            WHERE :actor_id IS NOT NULL
-            """,
-            params={"actor_id": actor_id},
-        )
     if action not in {"view-app", "edit-app", "delete-app", "manage-app-access"}:
         return None
 
-    owner_actions = {
+    action_reasons = {
         "view-app": "Owner can view app",
         "edit-app": "Owner can edit app",
         "delete-app": "Owner can delete app",
@@ -93,19 +83,11 @@ def app_permission_sql(actor, action):
     FROM apps
     WHERE actor_id = :actor_id
       AND :actor_id IS NOT NULL
-      AND external = 0
-      AND deleted_at IS NULL
-    """
-    restriction_sql = """
-    SELECT 'apps' AS parent,
-           id AS child
-    FROM apps
-    WHERE actor_id = :actor_id
-      AND :actor_id IS NOT NULL
-      AND external = 0
+      AND external = 0 -- It's a stored HTML app, not an external app
       AND deleted_at IS NULL
     """
     if action == "view-app":
+        # view-app is restricted to non-private apps or user-owned apps
         restriction_sql = """
         SELECT 'apps' AS parent,
                id AS child
@@ -118,12 +100,23 @@ def app_permission_sql(actor, action):
                    AND external = 0
                ))
         """
+    else:
+        # edit/delete/manage permissions are restricted to the owner of the app
+        restriction_sql = """
+        SELECT 'apps' AS parent,
+            id AS child
+        FROM apps
+        WHERE actor_id = :actor_id
+        AND :actor_id IS NOT NULL
+        AND external = 0
+        AND deleted_at IS NULL
+        """
     return PermissionSQL(
         source="datasette-apps",
         sql=sql,
         restriction_sql=restriction_sql,
         params={
             "actor_id": actor_id,
-            "owner_reason": owner_actions[action],
+            "owner_reason": action_reasons[action],
         },
     )

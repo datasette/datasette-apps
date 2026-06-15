@@ -10,7 +10,12 @@ from datasette_apps import Registry
 async def test_apps_index_lists_apps_with_view_app_permission():
     datasette = Datasette(
         memory=True,
-        config={"permissions": {"view-app": {"id": "*"}}},
+        config={
+            "permissions": {
+                "create-app": {"id": "alice"},
+                "view-app": {"id": "*"},
+            }
+        },
     )
     await Registry(datasette).add_app(
         id="plugin:one",
@@ -33,7 +38,10 @@ async def test_apps_index_lists_apps_with_view_app_permission():
 
 @pytest.mark.asyncio
 async def test_create_view_and_edit_stored_app():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
 
     create = await datasette.client.post(
         "/-/apps/create",

@@ -45,7 +45,10 @@ async def test_app_edit_agent_tools_are_registered():
 
 @pytest.mark.asyncio
 async def test_app_create_agent_tool_creates_new_app():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
     await datasette.invoke_startup()
     tools = _tools_by_name()
 
@@ -93,6 +96,16 @@ async def test_app_create_agent_tool_requires_create_permission():
         await tools["app_create"].fn(
             datasette=datasette,
             actor=None,
+            name="Denied app",
+            html="<h1>Nope</h1>",
+        )
+    )
+    assert result == {"error": "Permission denied: create-app"}
+
+    result = json.loads(
+        await tools["app_create"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
             name="Denied app",
             html="<h1>Nope</h1>",
         )
@@ -240,7 +253,11 @@ async def test_app_agent_tools_require_app_edit_permission():
 
 @pytest.mark.asyncio
 async def test_app_agent_tool_rendered_links_respect_base_url():
-    datasette = Datasette(memory=True, settings={"base_url": "/prefix/"})
+    datasette = Datasette(
+        memory=True,
+        settings={"base_url": "/prefix/"},
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
     registry = Registry(datasette)
     app = await registry.create_stored_app(
         actor_id="alice",
@@ -282,7 +299,10 @@ async def test_app_agent_tool_rendered_links_respect_base_url():
 
 @pytest.mark.asyncio
 async def test_app_create_agent_tool_rejects_disallowed_csp_origin():
-    datasette = Datasette(memory=True)
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
     await datasette.invoke_startup()
     tools = _tools_by_name()
 
@@ -304,7 +324,10 @@ async def test_app_create_agent_tool_allows_allowlisted_csp_origin():
     datasette = Datasette(
         memory=True,
         config={
-            "plugins": {"datasette-apps": {"allowed_csp_origins": ["cdn.jsdelivr.net"]}}
+            "plugins": {
+                "datasette-apps": {"allowed_csp_origins": ["cdn.jsdelivr.net"]}
+            },
+            "permissions": {"create-app": {"id": "alice"}},
         },
     )
     await datasette.invoke_startup()
@@ -329,7 +352,12 @@ async def test_app_create_agent_tool_allows_allowlisted_csp_origin():
 async def test_app_create_agent_tool_allows_any_origin_with_permission():
     datasette = Datasette(
         memory=True,
-        config={"permissions": {"apps-set-csp": {"id": "alice"}}},
+        config={
+            "permissions": {
+                "apps-set-csp": {"id": "alice"},
+                "create-app": {"id": "alice"},
+            }
+        },
     )
     await datasette.invoke_startup()
     tools = _tools_by_name()
