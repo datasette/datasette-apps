@@ -27,17 +27,11 @@ dev = [
 # model when they are absent. A dependency-group rather than a
 # [project.optional-dependencies] extra because datasette-acl-share is a
 # direct-URL wheel, which PyPI rejects in published extras; revisit once it
-# lands on PyPI.
+# lands on PyPI. datasette-acl-share pulls in the datasette-acl release that
+# ships standard_roles(), so no separate datasette-acl pin is needed.
 acl = [
-    "datasette-acl>=0.5a1",
-    "datasette-acl-share @ https://github.com/datasette/datasette-acl-share/releases/download/0.0.1a2/datasette_acl_share-0.0.1a2-py3-none-any.whl",
+    "datasette-acl-share @ https://github.com/datasette/datasette-acl-share/releases/download/0.0.1a3/datasette_acl_share-0.0.1a3-py3-none-any.whl",
 ]
-
-[tool.uv.sources]
-# Temporary: standard_roles() is not in a datasette-acl release yet (0.5a1
-# predates it). When removing this, also bump the datasette-acl version
-# constraint above to the first release that ships standard_roles().
-datasette-acl = { path = "../datasette-acl", editable = true }
 
 [build-system]
 requires = ["setuptools"]
