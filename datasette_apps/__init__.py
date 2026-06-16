@@ -54,9 +54,13 @@ def permission_resources_sql(datasette, actor, action):
     return app_permission_sql(actor, action)
 
 
-@hookimpl
+@hookimpl(optionalhook=True)
 def datasette_acl_roles(datasette):
-    """Viewer / Editor / Manager roles for the ``app`` resource type."""
+    """Viewer / Editor / Manager roles for the ``app`` resource type.
+
+    ``datasette_acl_roles`` is a hookspec defined by datasette-acl; mark this
+    optional so the plugin still loads when acl (and its hookspec) is absent.
+    """
     return app_acl_roles()
 
 

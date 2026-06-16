@@ -10,7 +10,7 @@ from datasette import Forbidden, NotFound, Response
 from datasette.resources import DatabaseResource, QueryResource, TableResource
 from datasette.stored_queries import query_row_to_stored_query, stored_query_to_dict
 
-from .acl import datasette_share_assets
+from .acl import ACL_AVAILABLE, datasette_share_assets
 from .csp import (
     APP_VIEW_PARENT_CSP,
     CspOriginNotAllowed,
@@ -465,7 +465,7 @@ async def view_app(datasette, request):
                 "current_path": request.path,
                 "can_edit": can_edit,
                 "can_pin": bool(actor),
-                "show_share": can_manage,
+                "show_share": can_manage and ACL_AVAILABLE,
                 "actor_json": json.dumps({"id": _actor_id(actor), "kind": "user"})
                 if actor
                 else "",

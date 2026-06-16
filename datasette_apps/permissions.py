@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datasette.permissions import Action, PermissionSQL, Resource
 
-from .acl import APPS_PARENT
+from .acl import ACL_AVAILABLE, APPS_PARENT
 
 
 class AppsResource(Resource):
@@ -110,6 +110,11 @@ _ACL_GRANTS_RESTRICTION_SQL = """
 
 
 def _with_acl_grants(restriction_sql):
+    # Without acl installed its tables don't exist; UNIONing the acl branch
+    # would raise OperationalError. The bare restriction_sql is exactly the
+    # pre-acl owner-only / is_private filter.
+    if not ACL_AVAILABLE:
+        return restriction_sql
     return f"{restriction_sql}\nUNION\n{_ACL_GRANTS_RESTRICTION_SQL}"
 
 

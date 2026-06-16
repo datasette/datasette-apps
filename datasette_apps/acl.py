@@ -1,9 +1,8 @@
 """datasette-acl integration for per-app sharing.
 
-datasette-acl and datasette-acl-share (the share dialog UI) are hard
-dependencies; acl grants are the source of truth for per-app access.
-
-The mapping between the legacy model and acl grants:
+datasette-acl and datasette-acl-share (the share dialog UI) are *optional*
+dependencies. When both are installed, acl grants layer on top of the
+``apps.is_private`` access model:
 
     app owner (actor_id)    -> Manager role grant on the app
     is_private = 0          -> Viewer role grant for the ``authenticated``
@@ -13,26 +12,47 @@ The mapping between the legacy model and acl grants:
 ``is_private`` stays as the UI toggle; flipping it grants/revokes the
 ``authenticated`` audience. The share dialog can layer further per-actor
 grants on top.
+
+When acl is **not** installed, ``ACL_AVAILABLE`` is False and every function
+here degrades to a no-op / empty result. Access then resolves purely through
+this plugin's owner ``sql`` rule plus the ``is_private`` ``restriction_sql``
+(see permissions.py) and any instance ``view-app`` config — the pre-acl model.
 """
 
 from __future__ import annotations
 
-from datasette_acl.grants import Principal, grant as _grant, revoke as _revoke
-from datasette_acl.internal_migrations import (
-    internal_migrations as _acl_internal_migrations,
-)
-from datasette_acl.roles import standard_roles
-from sqlite_utils import Database as _SqliteUtilsDatabase
+try:
+    from datasette_acl.grants import Principal, grant as _grant, revoke as _revoke
+    from datasette_acl.internal_migrations import (
+        internal_migrations as _acl_internal_migrations,
+    )
+    from datasette_acl.roles import standard_roles
+    from sqlite_utils import Database as _SqliteUtilsDatabase
 
-from datasette_acl_share import datasette_share_assets
+    from datasette_acl_share import (
+        datasette_share_assets as _datasette_share_assets,
+    )
 
+    ACL_AVAILABLE = True
+    # "Anyone signed in" maps to acl's first-class ``authenticated`` audience.
+    GENERAL_PRINCIPAL = Principal.authenticated()
+except ImportError:
+    ACL_AVAILABLE = False
+    GENERAL_PRINCIPAL = None
+
+# Plain identifiers with no acl dependency; permissions.py imports APPS_PARENT.
 APP_RESOURCE_TYPE = "app"
 APPS_PARENT = "apps"
-# "Anyone signed in" maps to acl's first-class ``authenticated`` audience.
-GENERAL_PRINCIPAL = Principal.authenticated()
 
 _MIGRATION_TABLE = "_datasette_apps_acl_migration"
 _MIGRATION_KEY = "grants-backfill-v1"
+
+
+def datasette_share_assets(datasette):
+    """CSS/JS for the share dialog, or empty lists when acl-share is absent."""
+    if not ACL_AVAILABLE:
+        return {"css": [], "js": []}
+    return _datasette_share_assets(datasette)
 
 
 def app_acl_roles():
@@ -42,6 +62,8 @@ def app_acl_roles():
     ``manage-app-access`` appear in no other role, which is what authorizes
     re-sharing via the dialog.
     """
+    if not ACL_AVAILABLE:
+        return []
     return standard_roles(
         APP_RESOURCE_TYPE,
         view="view-app",
@@ -66,7 +88,7 @@ async def _acl_ready(datasette):
 
 async def seed_owner_manager_grant(datasette, app_id, owner_actor_id):
     """Grant the app creator the Manager role. No-op for anonymous creators."""
-    if not owner_actor_id or not await _acl_ready(datasette):
+    if not ACL_AVAILABLE or not owner_actor_id or not await _acl_ready(datasette):
         return
     await _grant(
         datasette,
@@ -81,7 +103,7 @@ async def seed_owner_manager_grant(datasette, app_id, owner_actor_id):
 
 async def sync_general_access_grant(datasette, app_id, is_private, by_actor=None):
     """Mirror the is_private toggle onto the ``authenticated`` audience grant."""
-    if not await _acl_ready(datasette):
+    if not ACL_AVAILABLE or not await _acl_ready(datasette):
         return
     by_actor = str(by_actor) if by_actor else None
     if is_private:
@@ -142,6 +164,9 @@ async def backfill_acl_grants(datasette, *, force=False):
     short-circuits reruns, and grant() only inserts missing actions.
     """
     stats = {"owners": 0, "audiences": 0, "skipped": False}
+    if not ACL_AVAILABLE:
+        stats["skipped"] = True
+        return stats
     db = datasette.get_internal_database()
     await _ensure_acl_tables(db)
     await db.execute_write(

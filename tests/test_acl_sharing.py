@@ -1,12 +1,19 @@
-"""Per-app sharing via datasette-acl grants + the acl-share dialog."""
+"""Per-app sharing via datasette-acl grants + the acl-share dialog.
+
+datasette-acl is an optional dependency; skip this whole suite when it is not
+installed (the is_private fallback is covered by test_acl_optional.py).
+"""
 
 import pytest
-from datasette.app import Datasette
-from datasette_acl.grants import Principal, grant, list_grants, revoke
 
-from datasette_apps import Registry
-from datasette_apps import acl as apps_acl
-from datasette_apps.permissions import AppResource
+pytest.importorskip("datasette_acl")
+
+from datasette.app import Datasette  # noqa: E402
+from datasette_acl.grants import Principal, grant, list_grants, revoke  # noqa: E402
+
+from datasette_apps import Registry  # noqa: E402
+from datasette_apps import acl as apps_acl  # noqa: E402
+from datasette_apps.permissions import AppResource  # noqa: E402
 
 ALICE = {"id": "alice"}
 BOB = {"id": "bob"}
