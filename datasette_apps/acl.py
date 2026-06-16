@@ -77,18 +77,17 @@ def app_acl_roles():
     )
 
 
-async def _acl_ready(datasette):
-    # grant()/revoke() write into acl's tables; those don't exist until acl's
-    # startup applies its migrations. Seeding driven by registry operations
-    # that run before then must no-op and rely on the startup backfill. Role
-    # names resolve on demand via the datasette_acl_roles hook, so there is no
-    # registry to prime — table existence is the only prerequisite.
-    return await _acl_tables_present(datasette.get_internal_database())
-
-
 async def seed_owner_manager_grant(datasette, app_id, owner_actor_id):
-    """Grant the app creator the Manager role. No-op for anonymous creators."""
-    if not ACL_AVAILABLE or not owner_actor_id or not await _acl_ready(datasette):
+    """Grant the app creator the Manager role. No-op for anonymous creators.
+
+    No-ops when acl's tables don't exist yet (e.g. an app created before
+    ``invoke_startup`` runs the backfill); the startup backfill grants it.
+    """
+    if (
+        not ACL_AVAILABLE
+        or not owner_actor_id
+        or not await _acl_tables_present(datasette.get_internal_database())
+    ):
         return
     await _grant(
         datasette,
@@ -102,8 +101,14 @@ async def seed_owner_manager_grant(datasette, app_id, owner_actor_id):
 
 
 async def sync_general_access_grant(datasette, app_id, is_private, by_actor=None):
-    """Mirror the is_private toggle onto the ``authenticated`` audience grant."""
-    if not ACL_AVAILABLE or not await _acl_ready(datasette):
+    """Mirror the is_private toggle onto the ``authenticated`` audience grant.
+
+    No-ops when acl's tables don't exist yet; the startup backfill mirrors
+    the persisted ``is_private`` value once they do.
+    """
+    if not ACL_AVAILABLE or not await _acl_tables_present(
+        datasette.get_internal_database()
+    ):
         return
     by_actor = str(by_actor) if by_actor else None
     if is_private:
@@ -128,6 +133,9 @@ async def sync_general_access_grant(datasette, app_id, is_private, by_actor=None
 
 
 async def _acl_tables_present(db):
+    # grant()/revoke() write into acl's tables; those don't exist until acl's
+    # migrations run. seed/sync may fire before then (an app created prior to
+    # invoke_startup) and must no-op, deferring to the startup backfill.
     return bool(
         (
             await db.execute(
