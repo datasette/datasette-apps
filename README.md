@@ -10,6 +10,8 @@ Create apps that live inside Datasette
 ## Installation
 
 Install this plugin in the same environment as Datasette.
+
+Read [Host applications inside Datasette with Datasette Apps](https://datasette.io/blog/2026/datasette-apps/) for more on this project.
 ```bash
 datasette install datasette-apps
 ```
