@@ -33,8 +33,6 @@ jobs:
     - name: Install dependencies
       run: |
         pip install . --group dev
-        # Temporary until a datasette-acl release ships standard_roles()
-        pip install https://github.com/datasette/datasette-acl/archive/ec44575.zip
     - name: Cache Playwright browsers
       uses: actions/cache@v5
       with:

@@ -22,8 +22,6 @@ jobs:
     - name: Install dependencies
       run: |
         pip install . --group dev
-        # Temporary until a datasette-acl release ships standard_roles()
-        pip install https://github.com/datasette/datasette-acl/archive/ec44575.zip
     - name: Run tests
       run: |
         python -m pytest --ignore=tests/test_playwright.py
