@@ -14,23 +14,21 @@ dependencies = [
     "datasette-agent-edit>=0.1a0",
 ]
 
+[project.optional-dependencies]
+# Optional per-app sharing UI. Kept out of [project.dependencies] so the plugin
+# falls back to the is_private access model when absent. datasette-acl-share
+# pulls in datasette-acl, so no separate pin is needed.
+acl = [
+    "datasette-acl-share>=0.0.1a4",
+]
+
 [dependency-groups]
 dev = [
     "playwright>=1.60.0",
     "pytest",
     "pytest-asyncio",
     # Pull acl into the default dev/CI environment so its test suite runs.
-    {include-group = "acl"},
-]
-# Optional per-app sharing: datasette-acl + the share dialog UI. Kept out of
-# [project.dependencies] so the plugin falls back to the is_private access
-# model when they are absent. A dependency-group rather than a
-# [project.optional-dependencies] extra because datasette-acl-share is a
-# direct-URL wheel, which PyPI rejects in published extras; revisit once it
-# lands on PyPI. datasette-acl-share pulls in the datasette-acl release that
-# ships standard_roles(), so no separate datasette-acl pin is needed.
-acl = [
-    "datasette-acl-share @ https://github.com/datasette/datasette-acl-share/releases/download/0.0.1a3/datasette_acl_share-0.0.1a3-py3-none-any.whl",
+    "datasette-apps[acl]",
 ]
 
 [build-system]

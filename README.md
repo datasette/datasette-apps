@@ -103,7 +103,7 @@ External apps registered by plugins are not private by default, so they also req
 
 ### Sharing
 
-Stored apps support per-user sharing, built on [datasette-acl](https://github.com/datasette/datasette-acl) and [datasette-acl-share](https://github.com/datasette/datasette-acl-share) (dependencies of this plugin). Run Datasette with a persistent internal database (`datasette --internal internal.db`) so grants survive restarts:
+Stored apps support per-user sharing, built on [datasette-acl](https://github.com/datasette/datasette-acl) and [datasette-acl-share](https://github.com/datasette/datasette-acl-share). These are optional — install them with `pip install datasette-apps[acl]`; without them the plugin falls back to the owner-only / `is_private` access model. Run Datasette with a persistent internal database (`datasette --internal internal.db`) so grants survive restarts:
 
 - Apps register **Viewer** (`view-app`), **Editor** (`view-app`, `edit-app`) and **Manager** (everything, including `manage-app-access` and `delete-app`) roles with datasette-acl.
 - Creating an app grants its creator the Manager role; existing apps are backfilled with owner grants once at startup.
