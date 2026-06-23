@@ -19,7 +19,7 @@ dependencies = [
 # falls back to the is_private access model when absent. datasette-acl-share
 # pulls in datasette-acl, so no separate pin is needed.
 acl = [
-    "datasette-acl-share>=0.0.1a4",
+    "datasette-acl-share>=0.0.1a7",
 ]
 
 [dependency-groups]
