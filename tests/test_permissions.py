@@ -2,7 +2,15 @@ import pytest
 from datasette.app import Datasette
 
 from datasette_apps import Registry
+from datasette_apps.acl import ACL_AVAILABLE
 from datasette_apps.permissions import AppResource, AppsResource
+
+# Behaviour that depends on acl's "authenticated" audience grant supplying the
+# view-app ALLOW. Without acl the is_private fallback is covered by
+# test_acl_optional.py instead.
+requires_acl = pytest.mark.skipif(
+    not ACL_AVAILABLE, reason="requires datasette-acl audience grants"
+)
 
 
 @pytest.mark.asyncio
@@ -138,8 +146,13 @@ async def test_actors_with_view_app_can_view_external_apps():
     )
 
 
+@requires_acl
 @pytest.mark.asyncio
-async def test_non_private_app_requires_view_app_permission():
+async def test_non_private_app_viewable_by_signed_in_actors():
+    # With datasette-acl installed, "not private" maps to a Viewer grant for
+    # the "authenticated" public audience: any signed-in actor can view, no
+    # instance-level view-app configuration required. Anonymous actors still
+    # need an explicit config grant.
     datasette = Datasette(memory=True)
     registry = Registry(datasette)
     app = await registry.create_stored_app(
@@ -151,10 +164,15 @@ async def test_non_private_app_requires_view_app_permission():
     await registry.set_access_mode(app["id"], "not-private")
     await datasette.invoke_startup()
 
-    assert not await datasette.allowed(
+    assert await datasette.allowed(
         action="view-app",
         resource=AppResource(app["id"]),
         actor={"id": "bob"},
+    )
+    assert not await datasette.allowed(
+        action="view-app",
+        resource=AppResource(app["id"]),
+        actor=None,
     )
 
     datasette_with_permission = Datasette(
@@ -229,6 +247,7 @@ async def test_anonymous_can_view_non_private_app_if_permission_allows():
     assert "datasette-app-pin-form" not in response.text
 
 
+@requires_acl
 @pytest.mark.asyncio
 async def test_edit_app_can_be_granted_to_non_owner_for_non_private_app():
     datasette = Datasette(

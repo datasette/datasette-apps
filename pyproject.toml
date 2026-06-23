@@ -14,11 +14,21 @@ dependencies = [
     "datasette-agent-edit>=0.1a0",
 ]
 
+[project.optional-dependencies]
+# Optional per-app sharing UI. Kept out of [project.dependencies] so the plugin
+# falls back to the is_private access model when absent. datasette-acl-share
+# pulls in datasette-acl, so no separate pin is needed.
+acl = [
+    "datasette-acl-share>=0.0.1a7",
+]
+
 [dependency-groups]
 dev = [
     "playwright>=1.60.0",
     "pytest",
     "pytest-asyncio",
+    # Pull acl into the default dev/CI environment so its test suite runs.
+    "datasette-apps[acl]",
 ]
 
 [build-system]
