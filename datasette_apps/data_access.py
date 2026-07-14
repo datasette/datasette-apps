@@ -39,6 +39,8 @@ async def run_app_query(datasette, app, actor, database_name, sql, params=None):
         if response.status_code in (401, 403):
             raise AppQueryError("Permission denied by Datasette") from e
         raise AppQueryError("Query failed") from e
+    if response.status_code in (401, 403):
+        raise AppQueryError("Permission denied by Datasette")
     if response.status_code != 200 or not data.get("ok"):
         raise AppQueryError(data.get("error") or "Query failed")
     return {
@@ -102,6 +104,8 @@ def _json_response_or_error(response):
         if response.status_code in (401, 403):
             raise AppQueryError("Permission denied by Datasette") from e
         raise AppQueryError("Stored query failed") from e
+    if response.status_code in (401, 403):
+        raise AppQueryError("Permission denied by Datasette")
     if response.status_code != 200 or data.get("ok") is False:
         raise AppQueryError(
             data.get("error") or data.get("message") or "Stored query failed"
