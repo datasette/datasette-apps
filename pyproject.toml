@@ -1,6 +1,6 @@
 [project]
 name = "datasette-apps"
-version = "0.1a3"
+version = "0.1a4"
 description = "Create apps that live inside Datasette"
 readme = "README.md"
 authors = [{name = "Simon Willison"}]
@@ -10,7 +10,7 @@ classifiers=[
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "datasette>=1.0a31",
+    "datasette>=1.0a37",
     "datasette-agent-edit>=0.1a0",
 ]
 
