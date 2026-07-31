@@ -115,9 +115,8 @@ CREATE TABLE IF NOT EXISTS _app_debug_jobs (
     status TEXT NOT NULL,
     result TEXT,
     created_at TEXT NOT NULL,
-    claimed_at TEXT,
     completed_at TEXT,
-    CHECK (status IN ('pending', 'claimed', 'completed', 'expired'))
+    CHECK (status IN ('pending', 'completed', 'expired'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_app_debug_jobs_call

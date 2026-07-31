@@ -1,22 +1,30 @@
 """Debug jobs: run a JavaScript debug script inside a hidden, sandboxed
 render of a stored app in the user's own browser.
 
-A job row in _app_debug_jobs is the durable record of one debug run. The
-agent tool creates a job and suspends its turn with ask_user(); the
-harness HTML (rendered in the chat page) claims the job exactly once,
-renders the app in a hidden iframe, executes the debug script through
-the bridge, POSTs the result envelope back, and answers the question so
-the turn resumes. The table doubles as the audit trail: execution is
-invisible by design and runs queries as the user, so every run keeps a
-record of exactly what script ran, initiated by whom, against what.
+Execution rides on datasette-agent's browser-task primitive: the
+app_debug tool creates a job row, then suspends its turn with
+context.browser_task(), passing a generic harness bootstrap as the task
+HTML and everything run-specific (frame URL, tokens, the debug script)
+as the task payload - which the runtime hands out exactly once through
+its atomic claim. The harness renders the app in a hidden iframe,
+executes the debug script through the bridge, and posts the result
+envelope back with window.datasetteAgent.completeTask(); the resumed
+tool call receives that envelope as browser_task()'s return value and
+records it here.
+
+A job row in _app_debug_jobs is the durable audit record of one debug
+run - execution is invisible by design and runs queries as the user, so
+every run keeps a record of exactly what script ran, initiated by whom,
+against what. The row also gates the /frame and /query endpoints:
+both stop serving once the job has its result or its window expires.
 """
 
 from __future__ import annotations
 
-import html as html_module
 import json
 import secrets
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 
 from .ids import monotonic_ulid
 from .registry import Registry
@@ -27,6 +35,8 @@ MIN_TIMEOUT_MS = 1000
 MAX_TIMEOUT_MS = 60000
 MIN_VIEWPORT_PX = 100
 MAX_VIEWPORT_PX = 4000
+# How long the /frame and /query endpoints keep serving a job that
+# never received its result
 JOB_EXPIRY_SECONDS = 15 * 60
 MAX_EVENT_ERRORS = 50
 MAX_EVENT_LOGS = 100
@@ -34,6 +44,10 @@ MAX_EVENT_LOGS = 100
 RESULT_ENVELOPE_MAX_CHARS = 40000
 # When truncating an oversized envelope, keep at most this many errors
 TRUNCATED_MAX_ERRORS = 20
+# Slack added to the browser task's deadline beyond the job's own
+# timeout, so the harness can post a timed_out envelope itself rather
+# than letting the runtime expire the task
+BROWSER_TASK_SLACK_MS = 2000
 
 
 def _now():
@@ -116,7 +130,6 @@ async def create_debug_job(
         "status": "pending",
         "result": None,
         "created_at": _now(),
-        "claimed_at": None,
         "completed_at": None,
     }
     await datasette.get_internal_database().execute_write(
@@ -153,7 +166,7 @@ async def get_debug_job(datasette, job_id):
 
 async def get_debug_job_for_call(datasette, conversation_id, call_key):
     """The most recent job created for one tool call, so re-executing a
-    suspended call after the user's browser answers finds its job instead
+    suspended call after its browser task finishes finds its job instead
     of creating an orphan row."""
     if not call_key:
         return None
@@ -185,24 +198,23 @@ async def expire_debug_job(datasette, job_id):
     )
 
 
-async def claim_debug_job(datasette, job_id):
-    """Atomically claim a pending job. Returns the claimed job, or None
-    if the job was already claimed, completed or expired - the one-shot
-    gate that makes script-bearing question HTML safe to re-render from
-    conversation history."""
-    now = _now()
-
-    def claim(conn):
-        return conn.execute(
-            "UPDATE _app_debug_jobs SET status = 'claimed', claimed_at = ? "
-            "WHERE id = ? AND status = 'pending'",
-            (now, job_id),
-        ).rowcount
-
-    updated = await datasette.get_internal_database().execute_write_fn(claim)
-    if not updated:
-        return None
-    return await get_debug_job(datasette, job_id)
+def debug_task_payload(datasette, job):
+    """The browser-task payload for a job: everything run-specific the
+    harness needs, delivered exactly once through the runtime's claim.
+    Per-run secrets live here, never in the task HTML."""
+    config = job["config"]
+    frame_url = datasette.urls.path(
+        f"/-/apps/debug/{job['id']}/frame?"
+        + urlencode({"token": config["frame_token"]})
+    )
+    return {
+        "frame_url": frame_url,
+        "query_url": datasette.urls.path(f"/-/apps/debug/{job['id']}/query"),
+        "channel_token": config["channel_token"],
+        "javascript": job["javascript"],
+        "viewport": config["viewport"],
+        "timeout_ms": config["timeout_ms"],
+    }
 
 
 def _event_list(value, cap):
@@ -239,15 +251,17 @@ def normalize_envelope(envelope):
 
 
 async def complete_debug_job(datasette, job_id, envelope):
-    """Store the result envelope for a claimed job. Returns False if the
-    job is not currently claimed (never claimed, or already completed)."""
+    """Record the run's result envelope on the audit row: pending ->
+    completed, first write wins. Called by the resumed tool call with
+    the envelope browser_task() returned. Returns False if the job
+    already has a result or expired."""
     result_json = json.dumps(normalize_envelope(envelope))
     now = _now()
 
     def complete(conn):
         return conn.execute(
             "UPDATE _app_debug_jobs SET status = 'completed', "
-            "completed_at = ?, result = ? WHERE id = ? AND status = 'claimed'",
+            "completed_at = ?, result = ? WHERE id = ? AND status = 'pending'",
             (now, result_json, job_id),
         ).rowcount
 
@@ -287,21 +301,52 @@ def cap_envelope(envelope, max_chars=RESULT_ENVELOPE_MAX_CHARS):
     return envelope
 
 
-_HARNESS_TEMPLATE = """<div class="datasette-app-debug-harness" \
-data-debug-job-id="__JOB_ID_HTML__"></div>
+# The task HTML is a generic bootstrap: it discovers its task id from
+# the runtime's rendered task element, claims the task through
+# window.datasetteAgent (the one-shot claim is the only source of the
+# payload), runs the debug script in a hidden iframe, and posts the
+# envelope back with completeTask(). Nothing job-specific and no
+# secrets live here, so the persisted HTML is inert by construction -
+# and the runtime never re-renders task HTML after the task leaves
+# pending anyway.
+_HARNESS_HTML = """<div class="datasette-app-debug-harness"></div>
 <script>
 (function() {
-  var claimUrl = __CLAIM_URL__;
-  var resultUrl = __RESULT_URL__;
-  var queryUrl = __QUERY_URL__;
   var currentScript = document.currentScript;
+
+  function findTaskId() {
+    // The runtime renders task HTML inside .agent-browser-task-html,
+    // immediately after the .agent-browser-task status element that
+    // carries data-task-id.
+    var container = currentScript
+      ? currentScript.closest(".agent-browser-task-html")
+      : null;
+    var statusEl = container ? container.previousElementSibling : null;
+    if (
+      statusEl &&
+      statusEl.classList &&
+      statusEl.classList.contains("agent-browser-task") &&
+      statusEl.dataset &&
+      statusEl.dataset.taskId
+    ) {
+      return statusEl.dataset.taskId;
+    }
+    return null;
+  }
+
+  var agent = window.datasetteAgent;
+  var taskId = findTaskId();
+  if (!agent || !taskId) {
+    return;
+  }
+
   var finished = false;
   var startedAt = Date.now();
   var events = {errors: [], logs: []};
   var iframe = null;
   var bridgePort = null;
   var deadlineTimer = null;
-  var jobInfo = null;
+  var payload = null;
 
   function collectError(error) {
     if (events.errors.length < 50) {
@@ -315,40 +360,6 @@ data-debug-job-id="__JOB_ID_HTML__"></div>
     }
   }
 
-  function findQuestionContainer() {
-    var element = currentScript;
-    while (element && element !== document) {
-      if (element.classList && element.classList.contains("agent-question")) {
-        return element;
-      }
-      element = element.parentNode;
-    }
-    return null;
-  }
-
-  function answerQuestion(value) {
-    // V1 integration point with datasette-agent: submit the enclosing
-    // free-text question form so the suspended turn resumes through the
-    // page's own answer flow.
-    var container = findQuestionContainer();
-    if (!container) {
-      return;
-    }
-    var textarea = container.querySelector(
-      ".agent-question-controls textarea, textarea"
-    );
-    var form = textarea ? textarea.closest("form") : null;
-    if (!textarea || !form) {
-      return;
-    }
-    textarea.value = value;
-    if (typeof form.requestSubmit === "function") {
-      form.requestSubmit();
-    } else {
-      form.dispatchEvent(new Event("submit", {bubbles: true, cancelable: true}));
-    }
-  }
-
   function finish(envelope) {
     if (finished) {
       return;
@@ -359,18 +370,10 @@ data-debug-job-id="__JOB_ID_HTML__"></div>
     }
     envelope.events = events;
     envelope.duration_ms = Date.now() - startedAt;
-    fetch(resultUrl, {
-      method: "POST",
-      headers: {"content-type": "application/json"},
-      credentials: "same-origin",
-      body: JSON.stringify(envelope)
-    }).catch(function() {
-    }).then(function() {
-      if (iframe && iframe.parentNode) {
-        iframe.parentNode.removeChild(iframe);
-      }
-      answerQuestion("completed");
-    });
+    if (iframe && iframe.parentNode) {
+      iframe.parentNode.removeChild(iframe);
+    }
+    agent.completeTask(taskId, envelope);
   }
 
   async function handleBridgeMessage(event) {
@@ -412,7 +415,7 @@ data-debug-job-id="__JOB_ID_HTML__"></div>
       error: "Query request failed"
     };
     try {
-      var response = await fetch(queryUrl, {
+      var response = await fetch(payload.query_url, {
         method: "POST",
         headers: {"content-type": "application/json"},
         credentials: "same-origin",
@@ -437,7 +440,7 @@ data-debug-job-id="__JOB_ID_HTML__"></div>
     var message = event.data || {};
     if (
       message.type !== "datasette-app-channel-ready" ||
-      message.token !== jobInfo.channel_token ||
+      message.token !== payload.channel_token ||
       !event.ports ||
       !event.ports[0]
     ) {
@@ -452,22 +455,17 @@ data-debug-job-id="__JOB_ID_HTML__"></div>
     bridgePort.postMessage({
       type: "datasette-app-debug-eval",
       id: 1,
-      code: jobInfo.javascript
+      code: payload.javascript
     });
   }
 
-  fetch(claimUrl, {
-    method: "POST",
-    credentials: "same-origin"
-  }).then(function(response) {
-    return response.json();
-  }).then(function(data) {
-    if (!data || !data.ok) {
-      // Already executed (e.g. history replay re-rendering this HTML),
-      // expired, or not ours: do nothing.
+  agent.claimTask(taskId).then(function(claim) {
+    if (!claim || !claim.ok) {
+      // Another tab claimed it, or the task already finished or
+      // expired: stand down.
       return;
     }
-    jobInfo = data.job;
+    payload = claim.payload;
     window.addEventListener("message", acceptBridgePort);
     iframe = document.createElement("iframe");
     iframe.setAttribute("sandbox", "allow-scripts allow-forms");
@@ -476,45 +474,24 @@ data-debug-job-id="__JOB_ID_HTML__"></div>
     iframe.style.cssText =
       "position: fixed; left: 0; top: 0; border: 0; " +
       "opacity: 0; pointer-events: none;";
-    iframe.style.width = jobInfo.viewport.width + "px";
-    iframe.style.height = jobInfo.viewport.height + "px";
-    iframe.src = jobInfo.frame_url;
+    iframe.style.width = payload.viewport.width + "px";
+    iframe.style.height = payload.viewport.height + "px";
+    iframe.src = payload.frame_url;
     document.body.appendChild(iframe);
     deadlineTimer = setTimeout(function() {
       finish({
         ok: false,
         error: {
-          message: "Debug run timed out after " + jobInfo.timeout_ms + "ms"
+          message: "Debug run timed out after " + payload.timeout_ms + "ms"
         },
         timed_out: true
       });
-    }, Math.max(1000, jobInfo.timeout_ms - 500));
+    }, Math.max(1000, payload.timeout_ms));
   }).catch(function() {
   });
 })();
 </script>"""
 
 
-def _json_script_string(value):
-    return json.dumps(value).replace("</", "<\\/")
-
-
-def build_debug_harness_html(datasette, job):
-    """The HTML rendered above the suspended ask_user question. Contains
-    no secrets and no debug script: those arrive via the claim response,
-    and the one-shot claim gate means re-rendering this HTML from
-    conversation history never re-runs the job."""
-    job_id = job["id"]
-    urls = datasette.urls
-
-    def endpoint(suffix):
-        return urls.path(f"/-/apps/debug/{job_id}/{suffix}")
-
-    return (
-        _HARNESS_TEMPLATE.replace(
-            "__JOB_ID_HTML__", html_module.escape(job_id, quote=True)
-        )
-        .replace("__CLAIM_URL__", _json_script_string(endpoint("claim")))
-        .replace("__RESULT_URL__", _json_script_string(endpoint("result")))
-        .replace("__QUERY_URL__", _json_script_string(endpoint("query")))
-    )
+def build_debug_harness_html():
+    return _HARNESS_HTML

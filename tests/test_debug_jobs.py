@@ -11,9 +11,10 @@ from datasette_apps.debug import (
     DEFAULT_VIEWPORT,
     JOB_EXPIRY_SECONDS,
     build_debug_harness_html,
-    claim_debug_job,
     complete_debug_job,
     create_debug_job,
+    debug_task_payload,
+    expire_debug_job,
     get_debug_job,
 )
 from datasette_apps.rendering import iframe_bridge_script
@@ -33,6 +34,14 @@ async def _make_job(datasette, app, **kwargs):
     kwargs.setdefault("actor_id", "alice")
     kwargs.setdefault("javascript", "return document.title;")
     return await create_debug_job(datasette, app_id=app["id"], **kwargs)
+
+
+async def _backdate_job(datasette, job_id, seconds):
+    stale = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+    await datasette.get_internal_database().execute_write(
+        "UPDATE _app_debug_jobs SET created_at = ? WHERE id = ?",
+        [stale, job_id],
+    )
 
 
 @pytest.mark.asyncio
@@ -88,84 +97,24 @@ async def test_create_debug_job_validates_app_viewport_and_timeout():
 
 
 @pytest.mark.asyncio
-async def test_claim_endpoint_is_one_shot():
-    datasette = Datasette(memory=True)
+async def test_debug_task_payload_carries_run_specifics():
+    datasette = Datasette(memory=True, settings={"base_url": "/prefix/"})
     await datasette.invoke_startup()
     app = await _make_app(datasette)
-    job = await _make_job(datasette, app)
+    job = await _make_job(datasette, app, viewport={"width": 375, "height": 812})
 
-    response = await datasette.client.post(
-        f"/-/apps/debug/{job['id']}/claim", actor={"id": "alice"}
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["ok"] is True
-    claimed = data["job"]
-    assert claimed["id"] == job["id"]
-    assert claimed["javascript"] == "return document.title;"
-    assert claimed["viewport"] == DEFAULT_VIEWPORT
-    assert claimed["timeout_ms"] == DEFAULT_TIMEOUT_MS
-    assert claimed["channel_token"] == job["config"]["channel_token"]
-    assert claimed["frame_url"].startswith(f"/-/apps/debug/{job['id']}/frame?token=")
-    assert job["config"]["frame_token"] in claimed["frame_url"]
-
-    stored = await get_debug_job(datasette, job["id"])
-    assert stored["status"] == "claimed"
-    assert stored["claimed_at"]
-
-    # A second claim must not re-run the job (history replay protection)
-    again = await datasette.client.post(
-        f"/-/apps/debug/{job['id']}/claim", actor={"id": "alice"}
-    )
-    assert again.status_code == 200
-    assert again.json()["ok"] is False
-    assert "already" in again.json()["error"]
-
-
-@pytest.mark.asyncio
-async def test_claim_endpoint_requires_matching_actor():
-    datasette = Datasette(memory=True)
-    await datasette.invoke_startup()
-    app = await _make_app(datasette)
-    job = await _make_job(datasette, app)
-
-    assert (
-        await datasette.client.post(f"/-/apps/debug/{job['id']}/claim")
-    ).status_code == 403
-    assert (
-        await datasette.client.post(
-            f"/-/apps/debug/{job['id']}/claim", actor={"id": "bob"}
-        )
-    ).status_code == 403
-    assert (
-        await datasette.client.post("/-/apps/debug/nope/claim", actor={"id": "alice"})
-    ).status_code == 404
-    # Job is still claimable by its owner
-    assert (await get_debug_job(datasette, job["id"]))["status"] == "pending"
-
-
-@pytest.mark.asyncio
-async def test_pending_jobs_expire_instead_of_claiming():
-    datasette = Datasette(memory=True)
-    await datasette.invoke_startup()
-    app = await _make_app(datasette)
-    job = await _make_job(datasette, app)
-
-    stale = (
-        datetime.now(timezone.utc) - timedelta(seconds=JOB_EXPIRY_SECONDS + 60)
-    ).isoformat()
-    await datasette.get_internal_database().execute_write(
-        "UPDATE _app_debug_jobs SET created_at = ? WHERE id = ?",
-        [stale, job["id"]],
-    )
-
-    response = await datasette.client.post(
-        f"/-/apps/debug/{job['id']}/claim", actor={"id": "alice"}
-    )
-    assert response.status_code == 200
-    assert response.json()["ok"] is False
-    assert "expired" in response.json()["error"]
-    assert (await get_debug_job(datasette, job["id"]))["status"] == "expired"
+    payload = debug_task_payload(datasette, job)
+    assert payload == {
+        "frame_url": (
+            f"/prefix/-/apps/debug/{job['id']}/frame"
+            f"?token={job['config']['frame_token']}"
+        ),
+        "query_url": f"/prefix/-/apps/debug/{job['id']}/query",
+        "channel_token": job["config"]["channel_token"],
+        "javascript": "return document.title;",
+        "viewport": {"width": 375, "height": 812},
+        "timeout_ms": DEFAULT_TIMEOUT_MS,
+    }
 
 
 @pytest.mark.asyncio
@@ -181,16 +130,7 @@ async def test_frame_serves_job_revision_with_debug_bridge():
     )
 
     frame_path = f"/-/apps/debug/{job['id']}/frame"
-    token = job["config"]["frame_token"]
-
-    # The frame only renders once the job has been claimed
-    before_claim = await datasette.client.get(f"{frame_path}?token={token}")
-    assert before_claim.status_code == 403
-
-    claim = await datasette.client.post(
-        f"/-/apps/debug/{job['id']}/claim", actor={"id": "alice"}
-    )
-    frame_url = claim.json()["job"]["frame_url"]
+    frame_url = debug_task_payload(datasette, job)["frame_url"]
 
     response = await datasette.client.get(frame_url)
     assert response.status_code == 200
@@ -202,6 +142,8 @@ async def test_frame_serves_job_revision_with_debug_bridge():
     assert job["config"]["channel_token"] in response.text
     assert response.headers["cache-control"] == "no-store"
 
+    # The frame token is the capability: no token or a wrong token is
+    # refused, and unknown jobs 404
     assert (await datasette.client.get(frame_path)).status_code == 403
     assert (
         await datasette.client.get(f"{frame_path}?token=wrong")
@@ -209,6 +151,30 @@ async def test_frame_serves_job_revision_with_debug_bridge():
     assert (
         await datasette.client.get("/-/apps/debug/nope/frame?token=x")
     ).status_code == 404
+
+    # Once the job has its result the frame stops serving
+    await complete_debug_job(datasette, job["id"], {"ok": True})
+    assert (await datasette.client.get(frame_url)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_frame_and_query_refuse_expired_jobs():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+    app = await _make_app(datasette, sql_databases=["_memory"])
+    job = await _make_job(datasette, app)
+    await _backdate_job(datasette, job["id"], JOB_EXPIRY_SECONDS + 60)
+
+    frame_url = debug_task_payload(datasette, job)["frame_url"]
+    assert (await datasette.client.get(frame_url)).status_code == 403
+
+    query = await datasette.client.post(
+        f"/-/apps/debug/{job['id']}/query",
+        actor={"id": "alice"},
+        json={"database": "_memory", "sql": "select 1"},
+    )
+    assert query.status_code == 403
+    assert (await get_debug_job(datasette, job["id"]))["status"] == "expired"
 
 
 @pytest.mark.asyncio
@@ -219,14 +185,6 @@ async def test_query_endpoint_enforces_app_allowlists_and_actor():
     job = await _make_job(datasette, app)
     query_path = f"/-/apps/debug/{job['id']}/query"
     body = {"database": "_memory", "sql": "select 1 as one"}
-
-    # Queries only run while the job is claimed
-    pending = await datasette.client.post(query_path, actor={"id": "alice"}, json=body)
-    assert pending.status_code == 403
-
-    await datasette.client.post(
-        f"/-/apps/debug/{job['id']}/claim", actor={"id": "alice"}
-    )
 
     response = await datasette.client.post(
         query_path, actor={"id": "alice"}, json=body
@@ -251,14 +209,36 @@ async def test_query_endpoint_enforces_app_allowlists_and_actor():
     ).status_code == 403
     assert (await datasette.client.post(query_path, json=body)).status_code == 403
 
+    # Queries stop once the job has its result
+    await complete_debug_job(datasette, job["id"], {"ok": True})
+    assert (
+        await datasette.client.post(query_path, actor={"id": "alice"}, json=body)
+    ).status_code == 403
+
 
 @pytest.mark.asyncio
-async def test_result_endpoint_completes_job_once_and_normalizes():
+async def test_claim_and_result_endpoints_are_gone():
+    # The one-shot claim and result delivery moved into datasette-agent's
+    # browser-task runtime; datasette-apps no longer exposes them.
     datasette = Datasette(memory=True)
     await datasette.invoke_startup()
     app = await _make_app(datasette)
     job = await _make_job(datasette, app)
-    result_path = f"/-/apps/debug/{job['id']}/result"
+
+    for suffix in ("claim", "result"):
+        response = await datasette.client.post(
+            f"/-/apps/debug/{job['id']}/{suffix}", actor={"id": "alice"}
+        )
+        assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_complete_debug_job_stores_audit_envelope_once():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+    app = await _make_app(datasette)
+    job = await _make_job(datasette, app)
+
     envelope = {
         "ok": True,
         "result": {"title": "Debug me"},
@@ -269,27 +249,7 @@ async def test_result_endpoint_completes_job_once_and_normalizes():
         "duration_ms": 1234,
         "timed_out": False,
     }
-
-    # Results are only accepted for claimed jobs
-    assert (
-        await datasette.client.post(
-            result_path, actor={"id": "alice"}, json=envelope
-        )
-    ).status_code == 403
-
-    await datasette.client.post(
-        f"/-/apps/debug/{job['id']}/claim", actor={"id": "alice"}
-    )
-
-    assert (
-        await datasette.client.post(result_path, actor={"id": "bob"}, json=envelope)
-    ).status_code == 403
-
-    response = await datasette.client.post(
-        result_path, actor={"id": "alice"}, json=envelope
-    )
-    assert response.status_code == 200
-    assert response.json()["ok"] is True
+    assert await complete_debug_job(datasette, job["id"], envelope)
 
     stored = await get_debug_job(datasette, job["id"])
     assert stored["status"] == "completed"
@@ -301,39 +261,24 @@ async def test_result_endpoint_completes_job_once_and_normalizes():
     assert stored["result"]["events"]["errors"] == [
         {"kind": "javascript-error", "message": "boom"}
     ]
-    # Event lists are capped server-side
+    # Event lists are capped on write
     assert len(stored["result"]["events"]["logs"]) == 100
 
-    again = await datasette.client.post(
-        result_path, actor={"id": "alice"}, json=envelope
-    )
-    assert again.status_code == 200
-    assert again.json()["ok"] is False
+    # Completing twice is refused; so is completing an expired job
+    assert not await complete_debug_job(datasette, job["id"], {"ok": False})
 
-    garbage = await _make_job(datasette, app)
-    await datasette.client.post(
-        f"/-/apps/debug/{garbage['id']}/claim", actor={"id": "alice"}
-    )
-    bad = await datasette.client.post(
-        f"/-/apps/debug/{garbage['id']}/result",
-        actor={"id": "alice"},
-        content=b"not json",
-        headers={"content-type": "application/json"},
-    )
-    assert bad.status_code == 200
-    assert bad.json()["ok"] is False
-    assert (await get_debug_job(datasette, garbage["id"]))["status"] == "claimed"
+    other = await _make_job(datasette, app)
+    await expire_debug_job(datasette, other["id"])
+    assert not await complete_debug_job(datasette, other["id"], {"ok": True})
+    assert (await get_debug_job(datasette, other["id"]))["status"] == "expired"
 
 
 @pytest.mark.asyncio
-async def test_complete_debug_job_helper():
+async def test_complete_debug_job_normalizes_failure_envelopes():
     datasette = Datasette(memory=True)
     await datasette.invoke_startup()
     app = await _make_app(datasette)
     job = await _make_job(datasette, app)
-    claimed = await claim_debug_job(datasette, job["id"])
-    assert claimed["status"] == "claimed"
-    assert await claim_debug_job(datasette, job["id"]) is None
 
     assert await complete_debug_job(
         datasette, job["id"], {"ok": False, "error": {"message": "script threw"}}
@@ -343,28 +288,20 @@ async def test_complete_debug_job_helper():
     assert stored["result"]["error"] == {"message": "script threw"}
     assert stored["result"]["events"] == {"errors": [], "logs": []}
     assert stored["result"]["timed_out"] is False
-    # Completing twice is refused
-    assert not await complete_debug_job(datasette, job["id"], {"ok": True})
 
 
-@pytest.mark.asyncio
-async def test_debug_harness_html_contains_claim_wiring_but_no_secrets():
-    datasette = Datasette(memory=True, settings={"base_url": "/prefix/"})
-    await datasette.invoke_startup()
-    app = await _make_app(datasette)
-    job = await _make_job(datasette, app)
-
-    harness = build_debug_harness_html(datasette, job)
+def test_debug_harness_html_is_a_generic_bootstrap():
+    harness = build_debug_harness_html()
     assert "<script" in harness
-    assert job["id"] in harness
-    assert f"/prefix/-/apps/debug/{job['id']}/claim" in harness
-    assert "agent-question" in harness
-    # Secrets and the script arrive via the claim response, not the
-    # persisted question HTML
-    assert job["config"]["channel_token"] not in harness
-    assert job["config"]["frame_token"] not in harness
-    assert "return document.title;" not in harness
-    # Layout-preserving hiding: display: none would zero out measurements
+    # Task identity comes from the runtime's rendered task element; the
+    # payload arrives through the one-shot claim - nothing job-specific
+    # lives in the HTML
+    assert "agent-browser-task" in harness
+    assert "datasetteAgent" in harness
+    assert "claimTask" in harness
+    assert "completeTask" in harness
+    # Layout-preserving hiding: hiding via display would zero out
+    # every measurement the debug script takes
     assert "opacity: 0" in harness
     assert "pointer-events: none" in harness
     assert "display: none" not in harness

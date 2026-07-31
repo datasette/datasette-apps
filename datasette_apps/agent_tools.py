@@ -7,11 +7,14 @@ from datasette_agent_edit import EditError, EditToolset, Editable, NotFound
 
 from .csp import configured_csp_allowlist, resolve_csp_origins
 from .debug import (
+    BROWSER_TASK_SLACK_MS,
     build_debug_harness_html,
     cap_envelope,
+    complete_debug_job,
     create_debug_job,
-    get_debug_job,
+    debug_task_payload,
     get_debug_job_for_call,
+    normalize_envelope,
 )
 from .permissions import AppResource, AppsResource
 from .registry import Registry
@@ -293,12 +296,13 @@ async def _app_debug(
         return _error("Permission denied: edit-app", app_id=app_id)
     conversation_id = getattr(context, "conversation_id", None)
     call_key = getattr(context, "call_key", None)
-    # Re-executing a suspended call (after the browser answers) must find
-    # the job it already created, not create an orphan row.
+    # Re-executing a suspended call (after its browser task finishes)
+    # must find the job it already created, not create an orphan row. A
+    # completed job means this is a fresh identical call: run fresh.
     job = await get_debug_job_for_call(datasette, conversation_id, call_key)
     if (
         job is None
-        or job["status"] == "expired"
+        or job["status"] != "pending"
         or job["app_id"] != app_id
         or job["javascript"] != javascript
     ):
@@ -315,31 +319,37 @@ async def _app_debug(
             )
         except ValueError as e:
             return _error(str(e), app_id=app_id)
+    app = await Registry(datasette).get_app(app_id)
     try:
-        await context.ask_user(
-            "Running the debug script against the app in your browser - this "
-            "completes automatically.",
-            free_text=True,
-            html=build_debug_harness_html(datasette, job),
+        outcome = await context.browser_task(
+            build_debug_harness_html(),
+            payload=debug_task_payload(datasette, job),
+            label="Running debug script against {}".format(
+                (app and app["name"]) or app_id
+            ),
+            timeout_ms=job["config"]["timeout_ms"] + BROWSER_TASK_SLACK_MS,
         )
     except Exception as e:
         # Matched by name so datasette-agent stays an optional dependency;
-        # QuestionPending (an llm.PauseChain) must keep propagating.
-        if e.__class__.__name__ == "QuestionsNotSupported":
+        # BrowserTaskPending (an llm.PauseChain) must keep propagating.
+        if e.__class__.__name__ == "BrowserTasksNotSupported":
             return _error(
                 "app_debug requires an interactive conversation with the "
                 "chat open in a browser; it is not available here",
                 app_id=app_id,
             )
         raise
-    job = await get_debug_job(datasette, job["id"])
-    if job["status"] != "completed" or not job["result"]:
-        return _error(
-            "Debug run did not complete (status: {})".format(job["status"]),
-            app_id=app_id,
-        )
-    payload = {"app_id": app_id, "version": job["version"]}
-    payload.update(cap_envelope(job["result"]))
+    if not isinstance(outcome, dict):
+        outcome = {}
+    envelope = normalize_envelope(outcome)
+    # The audit record: what ran and what came back
+    await complete_debug_job(datasette, job["id"], envelope)
+    payload = {
+        "app_id": app_id,
+        "version": job["version"],
+        "outcome": outcome.get("outcome") or "completed",
+    }
+    payload.update(cap_envelope(envelope))
     if payload.get("error") is None:
         payload.pop("error", None)
     return json.dumps(payload)

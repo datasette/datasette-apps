@@ -19,8 +19,6 @@ from .csp import (
 )
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
 from .debug import (
-    claim_debug_job,
-    complete_debug_job,
     debug_job_is_expired,
     expire_debug_job,
     get_debug_job,
@@ -704,49 +702,27 @@ def _require_debug_job_actor(request, job):
         raise Forbidden("Debug jobs are only accessible to the actor who created them")
 
 
-async def debug_claim(datasette, request):
-    if request.method != "POST":
-        return Response.text("Method not allowed", status=405)
+async def _running_debug_job_or_403(datasette, request):
+    """The job must still be awaiting its result: once the resumed tool
+    call records the envelope (or the window expires) the frame and
+    query endpoints stop serving."""
     job = await _debug_job_or_404(datasette, request)
-    _require_debug_job_actor(request, job)
     if job["status"] == "pending" and debug_job_is_expired(job):
         await expire_debug_job(datasette, job["id"])
-        return Response.json({"ok": False, "error": "This debug job has expired"})
-    claimed = await claim_debug_job(datasette, job["id"])
-    if claimed is None:
-        return Response.json(
-            {"ok": False, "error": "This debug job has already been executed"}
-        )
-    config = claimed["config"]
-    frame_url = datasette.urls.path(
-        f"/-/apps/debug/{claimed['id']}/frame?"
-        + urlencode({"token": config["frame_token"]})
-    )
-    return Response.json(
-        {
-            "ok": True,
-            "job": {
-                "id": claimed["id"],
-                "javascript": claimed["javascript"],
-                "viewport": config["viewport"],
-                "timeout_ms": config["timeout_ms"],
-                "channel_token": config["channel_token"],
-                "frame_url": frame_url,
-            },
-        }
-    )
+        job = await get_debug_job(datasette, job["id"])
+    if job["status"] != "pending":
+        raise Forbidden("Debug job is not running")
+    return job
 
 
 async def debug_frame(datasette, request):
-    job = await _debug_job_or_404(datasette, request)
+    job = await _running_debug_job_or_403(datasette, request)
     token = request.args.get("token") or ""
-    # The claim response is the only place the frame token is handed out,
-    # so a valid token proves this load belongs to the claimed run. The
-    # sandboxed iframe request may arrive without credentials; the
-    # capability URL stands in for the actor check.
-    if job["status"] != "claimed" or not secrets.compare_digest(
-        token, job["config"]["frame_token"]
-    ):
+    # The browser-task claim payload is the only place the frame token
+    # is handed out, so a valid token proves this load belongs to the
+    # claimed run. The sandboxed iframe request may arrive without
+    # credentials; the capability URL stands in for the actor check.
+    if not secrets.compare_digest(token, job["config"]["frame_token"]):
         raise Forbidden("Debug frame is not available")
     registry = Registry(datasette)
     version = await registry.get_version(job["app_id"], job["version"])
@@ -762,10 +738,8 @@ async def debug_frame(datasette, request):
 
 
 async def debug_query(datasette, request):
-    job = await _debug_job_or_404(datasette, request)
+    job = await _running_debug_job_or_403(datasette, request)
     _require_debug_job_actor(request, job)
-    if job["status"] != "claimed":
-        raise Forbidden("Debug job is not running")
     app = await Registry(datasette).get_app(job["app_id"])
     if app is None:
         raise NotFound("App not found")
@@ -794,23 +768,6 @@ async def debug_query(datasette, request):
         return Response.json({"ok": False, "error": f"Invalid request: {e}"})
     except AppQueryError as e:
         return Response.json({"ok": False, "error": str(e)})
-
-
-async def debug_result(datasette, request):
-    job = await _debug_job_or_404(datasette, request)
-    _require_debug_job_actor(request, job)
-    if job["status"] in ("pending", "expired"):
-        raise Forbidden("Debug job is not running")
-    try:
-        envelope = json.loads((await request.post_body()).decode("utf-8"))
-        completed = await complete_debug_job(datasette, job["id"], envelope)
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        return Response.json({"ok": False, "error": "Invalid result envelope"})
-    if not completed:
-        return Response.json(
-            {"ok": False, "error": "This debug job already has a result"}
-        )
-    return Response.json({"ok": True})
 
 
 async def launch_app(datasette, request):

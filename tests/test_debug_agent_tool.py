@@ -1,4 +1,4 @@
-"""Tests for the app_debug agent tool."""
+"""Tests for the app_debug agent tool, built on context.browser_task()."""
 
 from dataclasses import dataclass
 import json
@@ -8,7 +8,7 @@ from datasette.app import Datasette
 
 from datasette_apps import Registry
 from datasette_apps.agent_tools import get_app_edit_tools
-from datasette_apps.debug import get_debug_job_for_call
+from datasette_apps.debug import get_debug_job, get_debug_job_for_call
 
 
 @dataclass
@@ -20,15 +20,15 @@ class FakeAgentTool:
     required_permission: str | None = None
 
 
-class FakeQuestionPending(Exception):
-    """Stands in for datasette_agent's QuestionPending - must propagate."""
+class FakeBrowserTaskPending(Exception):
+    """Stands in for datasette_agent's BrowserTaskPending - must propagate."""
 
-    def __init__(self, question):
-        super().__init__(question["prompt"])
-        self.question = question
+    def __init__(self, task):
+        super().__init__(task.get("label") or "Working in your browser")
+        self.task = task
 
 
-class QuestionsNotSupported(Exception):
+class BrowserTasksNotSupported(Exception):
     """Matched by class name, like datasette_agent's exception."""
 
 
@@ -38,31 +38,27 @@ class FakeContext:
         *,
         conversation_id="conv-1",
         call_key="call-1",
-        answer=None,
-        supports_questions=True,
+        outcome=None,
+        supports_browser_tasks=True,
     ):
         self.conversation_id = conversation_id
         self.call_key = call_key
-        self.answer = answer
-        self.supports_questions = supports_questions
-        self.asked = None
+        self.outcome = outcome
+        self.supports_browser_tasks = supports_browser_tasks
+        self.task = None
 
-    async def ask_user(
-        self, prompt, *, options=None, free_text=False, html=None, text=None
-    ):
-        if not self.supports_questions:
-            raise QuestionsNotSupported()
-        self.asked = {
-            "prompt": prompt,
-            "options": options,
-            "free_text": free_text,
+    async def browser_task(self, html, *, payload=None, label=None, timeout_ms=60000):
+        if not self.supports_browser_tasks:
+            raise BrowserTasksNotSupported()
+        self.task = {
             "html": html,
+            "payload": payload,
+            "label": label,
+            "timeout_ms": timeout_ms,
         }
-        if self.answer is not None:
-            return self.answer
-        raise FakeQuestionPending(
-            {"prompt": prompt, "html": html, "question_type": "text"}
-        )
+        if self.outcome is not None:
+            return self.outcome
+        raise FakeBrowserTaskPending({"label": label, "html": html})
 
 
 def _tools_by_name():
@@ -77,15 +73,25 @@ async def _make_app(datasette, **kwargs):
     return await Registry(datasette).create_stored_app(**kwargs)
 
 
-async def _run_browser_side(datasette, job_id, envelope):
-    claim = await datasette.client.post(
-        f"/-/apps/debug/{job_id}/claim", actor={"id": "alice"}
-    )
-    assert claim.json()["ok"] is True
-    result = await datasette.client.post(
-        f"/-/apps/debug/{job_id}/result", actor={"id": "alice"}, json=envelope
-    )
-    assert result.json()["ok"] is True
+async def _job_count(datasette):
+    return (
+        await datasette.get_internal_database().execute(
+            "SELECT count(*) AS n FROM _app_debug_jobs"
+        )
+    ).first()["n"]
+
+
+COMPLETED_OUTCOME = {
+    "ok": True,
+    "result": {"title": "Hello"},
+    "events": {
+        "errors": [{"kind": "console-error", "message": "warned"}],
+        "logs": [{"kind": "datasette-call", "message": "datasette.query(...)"}],
+    },
+    "duration_ms": 321,
+    "timed_out": False,
+    "outcome": "completed",
+}
 
 
 @pytest.mark.asyncio
@@ -124,14 +130,14 @@ async def test_app_debug_requires_edit_permission():
 
 
 @pytest.mark.asyncio
-async def test_app_debug_suspends_turn_and_creates_pending_job():
+async def test_app_debug_suspends_turn_with_payload_and_pending_job():
     datasette = Datasette(memory=True)
     await datasette.invoke_startup()
     app = await _make_app(datasette)
     tools = _tools_by_name()
     context = FakeContext()
 
-    with pytest.raises(FakeQuestionPending):
+    with pytest.raises(FakeBrowserTaskPending):
         await tools["app_debug"].fn(
             datasette=datasette,
             actor={"id": "alice"},
@@ -148,13 +154,30 @@ async def test_app_debug_suspends_turn_and_creates_pending_job():
     assert job["javascript"] == "return document.title;"
     assert job["config"]["viewport"] == {"width": 375, "height": 812}
 
-    assert context.asked["free_text"] is True
-    assert job["id"] in context.asked["html"]
-    assert "debug" in context.asked["prompt"].lower()
+    # Per-run specifics ride the one-shot claim payload, never the HTML
+    payload = context.task["payload"]
+    assert payload["javascript"] == "return document.title;"
+    assert payload["viewport"] == {"width": 375, "height": 812}
+    assert payload["timeout_ms"] == job["config"]["timeout_ms"]
+    assert payload["channel_token"] == job["config"]["channel_token"]
+    assert payload["frame_url"] == (
+        f"/-/apps/debug/{job['id']}/frame?token={job['config']['frame_token']}"
+    )
+    assert payload["query_url"] == f"/-/apps/debug/{job['id']}/query"
+
+    html = context.task["html"]
+    assert "datasetteAgent" in html
+    assert job["config"]["channel_token"] not in html
+    assert job["config"]["frame_token"] not in html
+    assert "return document.title;" not in html
+
+    assert "Debug target" in context.task["label"]
+    # The task deadline leaves slack beyond the job's own timeout
+    assert context.task["timeout_ms"] == job["config"]["timeout_ms"] + 2000
 
     # Re-executing the same suspended call reuses the job instead of
     # creating an orphan row
-    with pytest.raises(FakeQuestionPending):
+    with pytest.raises(FakeBrowserTaskPending):
         await tools["app_debug"].fn(
             datasette=datasette,
             actor={"id": "alice"},
@@ -163,12 +186,7 @@ async def test_app_debug_suspends_turn_and_creates_pending_job():
             javascript="return document.title;",
             viewport={"width": 375, "height": 812},
         )
-    count = (
-        await datasette.get_internal_database().execute(
-            "SELECT count(*) AS n FROM _app_debug_jobs"
-        )
-    ).first()["n"]
-    assert count == 1
+    assert await _job_count(datasette) == 1
 
 
 @pytest.mark.asyncio
@@ -178,7 +196,7 @@ async def test_app_debug_returns_result_envelope_after_resume():
     app = await _make_app(datasette)
     tools = _tools_by_name()
 
-    with pytest.raises(FakeQuestionPending):
+    with pytest.raises(FakeBrowserTaskPending):
         await tools["app_debug"].fn(
             datasette=datasette,
             actor={"id": "alice"},
@@ -187,31 +205,18 @@ async def test_app_debug_returns_result_envelope_after_resume():
             javascript="return document.title;",
         )
     job = await get_debug_job_for_call(datasette, "conv-1", "call-1")
-    await _run_browser_side(
-        datasette,
-        job["id"],
-        {
-            "ok": True,
-            "result": {"title": "Hello"},
-            "events": {
-                "errors": [{"kind": "console-error", "message": "warned"}],
-                "logs": [{"kind": "datasette-call", "message": "datasette.query(...)"}],
-            },
-            "duration_ms": 321,
-            "timed_out": False,
-        },
-    )
 
     result = json.loads(
         await tools["app_debug"].fn(
             datasette=datasette,
             actor={"id": "alice"},
-            context=FakeContext(answer="completed"),
+            context=FakeContext(outcome=dict(COMPLETED_OUTCOME)),
             app_id=app["id"],
             javascript="return document.title;",
         )
     )
     assert result["ok"] is True
+    assert result["outcome"] == "completed"
     assert result["app_id"] == app["id"]
     assert result["version"] == 1
     assert result["result"] == {"title": "Hello"}
@@ -225,23 +230,54 @@ async def test_app_debug_returns_result_envelope_after_resume():
     assert result["timed_out"] is False
     assert "error" not in result
 
-    # Resuming created no extra job rows
-    count = (
-        await datasette.get_internal_database().execute(
-            "SELECT count(*) AS n FROM _app_debug_jobs"
-        )
-    ).first()["n"]
-    assert count == 1
+    # The audit row records the envelope; no extra job rows appeared
+    stored = await get_debug_job(datasette, job["id"])
+    assert stored["status"] == "completed"
+    assert stored["result"]["result"] == {"title": "Hello"}
+    assert await _job_count(datasette) == 1
 
 
 @pytest.mark.asyncio
-async def test_app_debug_reports_run_that_never_completed():
+async def test_app_debug_reports_expired_and_cancelled_outcomes():
     datasette = Datasette(memory=True)
     await datasette.invoke_startup()
     app = await _make_app(datasette)
     tools = _tools_by_name()
 
-    with pytest.raises(FakeQuestionPending):
+    for outcome_kind, message in [
+        ("expired", "Browser task timed out before completing"),
+        ("cancelled", "Cancelled by the user"),
+    ]:
+        context = FakeContext(
+            call_key=f"call-{outcome_kind}",
+            outcome={
+                "ok": False,
+                "error": {"message": message},
+                "outcome": outcome_kind,
+            },
+        )
+        result = json.loads(
+            await tools["app_debug"].fn(
+                datasette=datasette,
+                actor={"id": "alice"},
+                context=context,
+                app_id=app["id"],
+                javascript="return 1;",
+            )
+        )
+        assert result["ok"] is False
+        assert result["outcome"] == outcome_kind
+        assert result["error"]["message"] == message
+
+
+@pytest.mark.asyncio
+async def test_app_debug_fresh_identical_call_creates_new_job():
+    datasette = Datasette(memory=True)
+    await datasette.invoke_startup()
+    app = await _make_app(datasette)
+    tools = _tools_by_name()
+
+    with pytest.raises(FakeBrowserTaskPending):
         await tools["app_debug"].fn(
             datasette=datasette,
             actor={"id": "alice"},
@@ -249,23 +285,29 @@ async def test_app_debug_reports_run_that_never_completed():
             app_id=app["id"],
             javascript="return 1;",
         )
+    await tools["app_debug"].fn(
+        datasette=datasette,
+        actor={"id": "alice"},
+        context=FakeContext(outcome=dict(COMPLETED_OUTCOME)),
+        app_id=app["id"],
+        javascript="return 1;",
+    )
 
-    # The user answered the question by hand; the harness never ran
-    result = json.loads(
+    # A later identical call (its browser task marked consumed by the
+    # runtime) runs fresh: new job, prior audit row untouched
+    with pytest.raises(FakeBrowserTaskPending):
         await tools["app_debug"].fn(
             datasette=datasette,
             actor={"id": "alice"},
-            context=FakeContext(answer="whatever"),
+            context=FakeContext(),
             app_id=app["id"],
             javascript="return 1;",
         )
-    )
-    assert "did not complete" in result["error"]
-    assert result["app_id"] == app["id"]
+    assert await _job_count(datasette) == 2
 
 
 @pytest.mark.asyncio
-async def test_app_debug_requires_interactive_conversation():
+async def test_app_debug_requires_browser_task_support():
     datasette = Datasette(memory=True)
     await datasette.invoke_startup()
     app = await _make_app(datasette)
@@ -275,7 +317,7 @@ async def test_app_debug_requires_interactive_conversation():
         await tools["app_debug"].fn(
             datasette=datasette,
             actor={"id": "alice"},
-            context=FakeContext(supports_questions=False),
+            context=FakeContext(supports_browser_tasks=False),
             app_id=app["id"],
             javascript="return 1;",
         )
@@ -310,36 +352,24 @@ async def test_app_debug_truncates_oversized_results_keeping_errors():
     app = await _make_app(datasette)
     tools = _tools_by_name()
 
-    with pytest.raises(FakeQuestionPending):
-        await tools["app_debug"].fn(
-            datasette=datasette,
-            actor={"id": "alice"},
-            context=FakeContext(),
-            app_id=app["id"],
-            javascript="return 1;",
-        )
-    job = await get_debug_job_for_call(datasette, "conv-1", "call-1")
     errors = [{"kind": "javascript-error", "message": f"error {i}"} for i in range(5)]
-    await _run_browser_side(
-        datasette,
-        job["id"],
-        {
-            "ok": True,
-            "result": {"huge": "x" * 200000},
-            "events": {
-                "errors": errors,
-                "logs": [{"kind": "console-log", "message": "y" * 2000}] * 50,
-            },
-            "duration_ms": 5,
-            "timed_out": False,
-        },
-    )
-
     result = json.loads(
         await tools["app_debug"].fn(
             datasette=datasette,
             actor={"id": "alice"},
-            context=FakeContext(answer="completed"),
+            context=FakeContext(
+                outcome={
+                    "ok": True,
+                    "result": {"huge": "x" * 200000},
+                    "events": {
+                        "errors": errors,
+                        "logs": [{"kind": "console-log", "message": "y" * 2000}] * 50,
+                    },
+                    "duration_ms": 5,
+                    "timed_out": False,
+                    "outcome": "completed",
+                }
+            ),
             app_id=app["id"],
             javascript="return 1;",
         )
@@ -350,3 +380,81 @@ async def test_app_debug_truncates_oversized_results_keeping_errors():
     assert "truncated" in result
     assert any("result" in item for item in result["truncated"])
     assert len(json.dumps(result)) < 60000
+
+
+@pytest.mark.asyncio
+async def test_app_debug_with_real_datasette_agent_tool_context(tmp_path):
+    """Integration against the real browser-task runtime, when
+    datasette-agent is installed: suspend raises BrowserTaskPending, the
+    payload rides the one-shot claim, and replay returns the envelope."""
+    pytest.importorskip("datasette_agent")
+    from datasette_agent.browser_tasks import (
+        BrowserTaskPending,
+        claim_task,
+        complete_task,
+    )
+    from datasette_agent.questions import ToolContext
+    from datasette_agent.schema import ensure_tables
+
+    datasette = Datasette(memory=True, internal=str(tmp_path / "internal.db"))
+    await datasette.invoke_startup()
+    await ensure_tables(datasette.get_internal_database())
+    app = await _make_app(datasette)
+    tools = _tools_by_name()
+
+    def make_context():
+        return ToolContext(
+            datasette=datasette,
+            actor={"id": "alice"},
+            conversation_id="01CONVERSATION00000000TEST",
+            tool_name="app_debug",
+            arguments={"app_id": app["id"], "javascript": "return 1;"},
+            tool_call_id="call_1",
+            supports_browser_tasks=True,
+        )
+
+    with pytest.raises(BrowserTaskPending) as excinfo:
+        await tools["app_debug"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+            context=make_context(),
+            app_id=app["id"],
+            javascript="return 1;",
+        )
+    task = excinfo.value.task
+    assert "Debug target" in task["label"]
+    assert "datasetteAgent" in task["html"]
+
+    db = datasette.get_internal_database()
+    claimed, state = await claim_task(db, task["id"], "alice")
+    assert state is None
+    payload = json.loads(claimed["payload_json"])
+    job = await get_debug_job_for_call(
+        datasette, "01CONVERSATION00000000TEST", "id:call_1"
+    )
+    assert payload["channel_token"] == job["config"]["channel_token"]
+    assert payload["javascript"] == "return 1;"
+
+    assert (
+        await complete_task(
+            db,
+            task["id"],
+            {"ok": True, "result": {"answer": 1}, "duration_ms": 10},
+            "alice",
+        )
+        is None
+    )
+
+    result = json.loads(
+        await tools["app_debug"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+            context=make_context(),
+            app_id=app["id"],
+            javascript="return 1;",
+        )
+    )
+    assert result["ok"] is True
+    assert result["outcome"] == "completed"
+    assert result["result"] == {"answer": 1}
+    assert (await get_debug_job(datasette, job["id"]))["status"] == "completed"
