@@ -861,3 +861,192 @@ def test_csp_allowlisted_origin_can_receive_exfiltrated_data(tmp_path, monkeypat
         assert leak_server.requests == [
             {"method": "GET", "path": "/leak?secret=database-secret"}
         ]
+
+
+DEBUG_ACTOR_SECRET = "datasette-apps-debug-test-secret"
+
+# Simulates how datasette-agent renders question HTML: insert it, then
+# re-create the script elements so they execute.
+DEBUG_HARNESS_BOOTSTRAP = """
+(harnessHtml) => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  container.insertAdjacentHTML("beforeend", harnessHtml);
+  container.querySelectorAll("script").forEach((oldScript) => {
+    const newScript = document.createElement("script");
+    for (const attr of oldScript.attributes) {
+      newScript.setAttribute(attr.name, attr.value);
+    }
+    newScript.textContent = oldScript.textContent;
+    oldScript.replaceWith(newScript);
+  });
+}
+"""
+
+
+def _signed_actor_cookie(actor_id="alice"):
+    datasette = Datasette(memory=True, secret=DEBUG_ACTOR_SECRET)
+    return datasette.sign({"a": {"id": actor_id}}, "actor")
+
+
+async def _create_debug_job_with_harness(server, app_id, javascript, **kwargs):
+    from datasette_apps.debug import build_debug_harness_html, create_debug_job
+
+    datasette = Datasette(
+        [str(path) for path in server.files],
+        memory=True,
+        internal=str(server.internal_db_path),
+        config={"permissions": {"view-app": True}},
+    )
+    job = await create_debug_job(
+        datasette, actor_id="alice", app_id=app_id, javascript=javascript, **kwargs
+    )
+    harness = build_debug_harness_html(datasette, job)
+    datasette.close()
+    return job, harness
+
+
+def _wait_for_debug_job_result(internal_db_path, job_id, timeout=20):
+    deadline = time.monotonic() + timeout
+    row = None
+    while time.monotonic() < deadline:
+        conn = sqlite3.connect(str(internal_db_path))
+        try:
+            row = conn.execute(
+                "SELECT status, result FROM _app_debug_jobs WHERE id = ?",
+                [job_id],
+            ).fetchone()
+        finally:
+            conn.close()
+        if row and row[0] == "completed" and row[1]:
+            return json.loads(row[1])
+        time.sleep(0.2)
+    raise AssertionError(f"Debug job {job_id} did not complete, last row: {row}")
+
+
+def _run_debug_harness(server, page, harness):
+    page.context.add_cookies(
+        [{"name": "ds_actor", "value": _signed_actor_cookie(), "url": server.url}]
+    )
+    response = page.goto(server.url + "/")
+    assert response is not None
+    page.evaluate(DEBUG_HARNESS_BOOTSTRAP, harness)
+
+
+def test_debug_harness_runs_script_in_hidden_app_frame(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATASETTE_SECRET", DEBUG_ACTOR_SECRET)
+    content_db_path = tmp_path / "content.db"
+    _create_content_database(content_db_path)
+    server = DatasetteServer(tmp_path, files=[content_db_path])
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<div id="status">loading</div>
+<script>
+(async function() {
+  const result = await datasette.query(
+    "content", "select name from items order by score desc"
+  );
+  const list = document.createElement("ul");
+  list.id = "items";
+  result.rows.forEach((row) => {
+    const item = document.createElement("li");
+    item.textContent = row.name;
+    list.appendChild(item);
+  });
+  document.body.appendChild(list);
+  document.getElementById("status").textContent = "ready";
+})();
+</script>""",
+            name="Debuggable app",
+            sql_databases=["content"],
+        )
+    )
+    job, harness = asyncio.run(
+        _create_debug_job_with_harness(
+            server,
+            app["id"],
+            """
+const list = await debug.waitFor(() => document.querySelector("#items"));
+return {
+  itemCount: list.querySelectorAll("li").length,
+  status: document.querySelector("#status").textContent,
+  width: window.innerWidth,
+  height: window.innerHeight,
+};
+""",
+            viewport={"width": 375, "height": 812},
+        )
+    )
+
+    with server, _browser_page() as page:
+        _run_debug_harness(server, page, harness)
+        envelope = _wait_for_debug_job_result(server.internal_db_path, job["id"])
+
+        assert envelope["ok"] is True
+        assert envelope["timed_out"] is False
+        assert isinstance(envelope["duration_ms"], int)
+        assert envelope["result"] == {
+            "itemCount": 2,
+            "status": "ready",
+            "width": 375,
+            "height": 812,
+        }
+        assert envelope["events"]["errors"] == []
+        assert any(
+            log.get("kind") == "datasette-call"
+            for log in envelope["events"]["logs"]
+        )
+
+        # The hidden iframe is torn down after the run
+        page.wait_for_function("document.querySelectorAll('iframe').length === 0")
+
+        # The claim gate: re-running the harness (history replay) is a no-op
+        second_claim = page.evaluate(
+            """(claimUrl) => fetch(claimUrl, {
+              method: "POST", credentials: "same-origin"
+            }).then((r) => r.json())""",
+            f"/-/apps/debug/{job['id']}/claim",
+        )
+        assert second_claim["ok"] is False
+        assert "already" in second_claim["error"]
+
+
+def test_debug_harness_reports_app_errors_and_unserializable_result(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DATASETTE_SECRET", DEBUG_ACTOR_SECRET)
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<h1 id="title">Broken app</h1>
+<script>
+console.error("app warned");
+throw new Error("render exploded");
+</script>""",
+            name="Broken app",
+        )
+    )
+    job, harness = asyncio.run(
+        _create_debug_job_with_harness(
+            server, app["id"], "return document.querySelector('#title');"
+        )
+    )
+
+    with server, _browser_page() as page:
+        _run_debug_harness(server, page, harness)
+        envelope = _wait_for_debug_job_result(server.internal_db_path, job["id"])
+
+        # The debug script returned a DOM node: rejected with a corrective
+        # message, while the app's own errors are still captured.
+        assert envelope["ok"] is False
+        assert "not JSON-serializable" in envelope["error"]["message"]
+        kinds = {error["kind"] for error in envelope["events"]["errors"]}
+        assert "console-error" in kinds
+        assert "javascript-error" in kinds
+        messages = " ".join(
+            error.get("message", "") for error in envelope["events"]["errors"]
+        )
+        assert "app warned" in messages
+        assert "render exploded" in messages

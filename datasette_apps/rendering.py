@@ -12,7 +12,133 @@ def _csp_meta(csp):
     )
 
 
-def iframe_bridge_script(channel_token=None):
+# Only injected into debug frames: ordinary app views have no eval
+# surface. Execution inserts an inline <script> element, which the
+# production script-src 'unsafe-inline' policy already permits - no
+# 'unsafe-eval', no debug-only CSP variant.
+_DEBUG_BRIDGE_EXTENSIONS = """
+  window.debug = {
+    waitFor: function(fn, options) {
+      options = options || {};
+      var timeout = options.timeout === undefined ? 10000 : options.timeout;
+      var interval = options.interval === undefined ? 100 : options.interval;
+      return new Promise(function(resolve, reject) {
+        var startedAt = Date.now();
+        function poll() {
+          var value;
+          try {
+            value = fn();
+          } catch (ignore) {
+            value = undefined;
+          }
+          if (value) {
+            resolve(value);
+            return;
+          }
+          if (Date.now() - startedAt >= timeout) {
+            reject(new Error(
+              "debug.waitFor timed out after " + timeout + "ms"
+            ));
+            return;
+          }
+          setTimeout(poll, interval);
+        }
+        poll();
+      });
+    }
+  };
+
+  function debugResultIsSerializable(value, depth) {
+    if (value === null || value === undefined) {
+      return true;
+    }
+    var type = typeof value;
+    if (type === "function") {
+      return false;
+    }
+    if (type !== "object") {
+      return true;
+    }
+    if (typeof Node !== "undefined" && value instanceof Node) {
+      return false;
+    }
+    if (depth > 20) {
+      return false;
+    }
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i += 1) {
+      if (!debugResultIsSerializable(value[keys[i]], depth + 1)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function runDebugScript(id, code) {
+    function report(ok, payload) {
+      var message = {type: "datasette-app-debug-result", id: id, ok: ok};
+      if (ok) {
+        message.result = payload;
+      } else {
+        message.error = payload;
+      }
+      postToParent(message);
+    }
+    var notSerializable = {
+      message: "Debug script result is not JSON-serializable - return " +
+        ".textContent or measurements, not elements"
+    };
+    window.__datasetteAppsDebugReport = function(value) {
+      delete window.__datasetteAppsDebugReport;
+      delete window.__datasetteAppsDebugReportError;
+      if (value === undefined) {
+        value = null;
+      }
+      if (!debugResultIsSerializable(value, 0)) {
+        report(false, notSerializable);
+        return;
+      }
+      var serialized;
+      try {
+        serialized = JSON.stringify(value);
+      } catch (ignore) {
+        report(false, notSerializable);
+        return;
+      }
+      if (serialized === undefined) {
+        report(false, notSerializable);
+        return;
+      }
+      report(true, JSON.parse(serialized));
+    };
+    window.__datasetteAppsDebugReportError = function(error) {
+      delete window.__datasetteAppsDebugReport;
+      delete window.__datasetteAppsDebugReportError;
+      report(false, normalizeError(error));
+    };
+    var script = document.createElement("script");
+    script.textContent = "(async function() {" +
+      "try { window.__datasetteAppsDebugReport(" +
+      "await (async function() {\\n" + code + "\\n})()); }" +
+      " catch (error) { window.__datasetteAppsDebugReportError(error); }" +
+      "})();";
+    (document.body || document.documentElement).appendChild(script);
+    if (script.parentNode) {
+      script.parentNode.removeChild(script);
+    }
+  }
+
+  debugMessageHandler = function(message) {
+    if (message.type !== "datasette-app-debug-eval") {
+      return false;
+    }
+    runDebugScript(message.id, String(message.code || ""));
+    return true;
+  };
+"""
+
+
+def iframe_bridge_script(channel_token=None, debug=False):
     if channel_token is None:
         channel_token = "datasette-apps-test-channel"
     script = """<script id="datasette-apps-bridge">
@@ -23,6 +149,7 @@ def iframe_bridge_script(channel_token=None):
   var bridgePort = null;
   var lastViewportContent = null;
   var viewportReporterStarted = false;
+  var debugMessageHandler = null;
 
   function noopHistoryMethod() {
   }
@@ -318,8 +445,12 @@ def iframe_bridge_script(channel_token=None):
     };
   }
 
+__DEBUG_EXTENSIONS__
   function handleBridgeMessage(event) {
     var message = event.data || {};
+    if (debugMessageHandler && debugMessageHandler(message)) {
+      return;
+    }
     if (message.type !== "datasette-app-response" || !pending.has(message.id)) {
       return;
     }
@@ -408,7 +539,9 @@ def iframe_bridge_script(channel_token=None):
   }
 })();
 </script>"""
-    return script.replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
+    return script.replace(
+        "__DEBUG_EXTENSIONS__", _DEBUG_BRIDGE_EXTENSIONS if debug else ""
+    ).replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
 
 
 def parent_bridge_script(
