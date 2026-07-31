@@ -894,7 +894,12 @@ DEBUG_TASK_BOOTSTRAP = """
   document.body.appendChild(statusEl);
   const htmlEl = document.createElement("div");
   htmlEl.className = "agent-browser-task-html";
-  htmlEl.insertAdjacentHTML("beforeend", harnessHtml);
+  // Matches renderBrowserTask: the container carries the task id, the
+  // sanctioned discovery contract for task HTML
+  htmlEl.dataset.taskId = taskId;
+  htmlEl.insertAdjacentHTML(
+    "beforeend", harnessHtml.replaceAll("__DATASETTE_TASK_ID__", taskId)
+  );
   document.body.appendChild(htmlEl);
   htmlEl.querySelectorAll("script").forEach(oldScript => {
     const newScript = document.createElement("script");

@@ -293,10 +293,10 @@ async def test_complete_debug_job_normalizes_failure_envelopes():
 def test_debug_harness_html_is_a_generic_bootstrap():
     harness = build_debug_harness_html()
     assert "<script" in harness
-    # Task identity comes from the runtime's rendered task element; the
+    # Task identity comes from the runtime's data-task-id container; the
     # payload arrives through the one-shot claim - nothing job-specific
     # lives in the HTML
-    assert "agent-browser-task" in harness
+    assert "[data-task-id]" in harness
     assert "datasetteAgent" in harness
     assert "claimTask" in harness
     assert "completeTask" in harness

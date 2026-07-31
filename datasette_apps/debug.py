@@ -315,23 +315,12 @@ _HARNESS_HTML = """<div class="datasette-app-debug-harness"></div>
   var currentScript = document.currentScript;
 
   function findTaskId() {
-    // The runtime renders task HTML inside .agent-browser-task-html,
-    // immediately after the .agent-browser-task status element that
-    // carries data-task-id.
+    // Sanctioned contract: the runtime renders task HTML inside a
+    // container carrying data-task-id.
     var container = currentScript
-      ? currentScript.closest(".agent-browser-task-html")
+      ? currentScript.closest("[data-task-id]")
       : null;
-    var statusEl = container ? container.previousElementSibling : null;
-    if (
-      statusEl &&
-      statusEl.classList &&
-      statusEl.classList.contains("agent-browser-task") &&
-      statusEl.dataset &&
-      statusEl.dataset.taskId
-    ) {
-      return statusEl.dataset.taskId;
-    }
-    return null;
+    return container ? container.dataset.taskId : null;
   }
 
   var agent = window.datasetteAgent;
