@@ -393,8 +393,8 @@ async def test_app_debug_with_real_datasette_agent_tool_context(tmp_path):
         claim_task,
         complete_task,
     )
-    from datasette_agent.questions import ToolContext
     from datasette_agent.schema import ensure_tables
+    from datasette_agent.tools import ToolContext
 
     datasette = Datasette(memory=True, internal=str(tmp_path / "internal.db"))
     await datasette.invoke_startup()

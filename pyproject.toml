@@ -16,6 +16,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "datasette-agent>=0.4a0",
     "playwright>=1.60.0",
     "pytest",
     "pytest-asyncio",
