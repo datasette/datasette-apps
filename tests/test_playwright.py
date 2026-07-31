@@ -1080,4 +1080,17 @@ throw new Error("render exploded");
             error.get("message", "") for error in envelope["events"]["errors"]
         )
         assert "app warned" in messages
-        assert "render exploded" in messages
+        # WebKit withholds uncaught-error details in sandboxed (opaque
+        # origin) frames - srcdoc and URL frames alike - reporting only
+        # "Script error."; the bridge annotates those so readers know why
+        # details are missing. Chromium and Firefox report in full.
+        js_errors = [
+            error
+            for error in envelope["events"]["errors"]
+            if error["kind"] == "javascript-error"
+        ]
+        assert any(
+            "render exploded" in error.get("message", "")
+            or (error.get("sanitized") and "details withheld" in error["message"])
+            for error in js_errors
+        )

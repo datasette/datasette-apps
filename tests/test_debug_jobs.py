@@ -307,6 +307,17 @@ def test_debug_harness_html_is_a_generic_bootstrap():
     assert "display: none" not in harness
 
 
+def test_bridge_annotates_sanitized_script_errors():
+    # WebKit reports uncaught errors in sandboxed (opaque origin) frames
+    # only as "Script error."; the bridge annotates those events - in app
+    # views and debug frames alike - so readers know why details are
+    # missing and which channels still carry them.
+    for script in (iframe_bridge_script("t"), iframe_bridge_script("t", debug=True)):
+        assert "Script error." in script
+        assert "details withheld" in script
+        assert "sanitized" in script
+
+
 def test_iframe_bridge_debug_mode_gates_eval_channel():
     plain = iframe_bridge_script("token-1")
     assert "datasette-app-debug-eval" not in plain
