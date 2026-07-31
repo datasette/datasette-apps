@@ -993,6 +993,10 @@ def test_debug_harness_runs_script_in_hidden_app_frame(tmp_path, monkeypatch):
             app["id"],
             """
 const list = await debug.waitFor(() => document.querySelector("#items"));
+// The hidden frame's first layout commit can lag DOM readiness on slow
+// machines - window.innerWidth reads 0 until it happens, so wait for it
+// like any other readiness condition.
+await debug.waitFor(() => window.innerWidth);
 return {
   itemCount: list.querySelectorAll("li").length,
   status: document.querySelector("#status").textContent,

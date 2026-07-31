@@ -71,7 +71,10 @@ APP_TOOL_DESCRIPTIONS = {
         "not DOM elements. Apps render asynchronously, so wait for readiness "
         "with await debug.waitFor(fn, {timeout, interval}), which polls fn "
         "until it returns a truthy value, for example await "
-        'debug.waitFor(() => document.querySelector("#chart")). Captured '
+        'debug.waitFor(() => document.querySelector("#chart")). Layout '
+        "measurements need the same treatment: the hidden frame's first "
+        "layout can lag DOM readiness, so before reading sizes wait with "
+        "await debug.waitFor(() => window.innerWidth). Captured "
         "events include JavaScript errors, unhandled rejections, CSP "
         "violations, failed fetches, console output and datasette.query() "
         "calls, from page load through script completion. Caveat: synthetic "
