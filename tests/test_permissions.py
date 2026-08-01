@@ -294,9 +294,7 @@ async def test_private_app_edit_delete_and_manage_access_remain_owner_only():
             actor={"id": "bob"},
         )
 
-    edit = await datasette.client.get(
-        f"/-/apps/{app['id']}/edit", actor={"id": "bob"}
-    )
+    edit = await datasette.client.get(f"/-/apps/{app['id']}/edit", actor={"id": "bob"})
     assert edit.status_code == 403
 
     delete = await datasette.client.get(

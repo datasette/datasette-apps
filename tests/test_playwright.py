@@ -862,6 +862,7 @@ def test_csp_allowlisted_origin_can_receive_exfiltrated_data(tmp_path, monkeypat
             {"method": "GET", "path": "/leak?secret=database-secret"}
         ]
 
+
 DEBUG_ACTOR_SECRET = "datasette-apps-debug-test-secret"
 
 # Simulates datasette-agent's browser-task runtime: the status element
@@ -1025,8 +1026,7 @@ return {
         }
         assert envelope["events"]["errors"] == []
         assert any(
-            log.get("kind") == "datasette-call"
-            for log in envelope["events"]["logs"]
+            log.get("kind") == "datasette-call" for log in envelope["events"]["logs"]
         )
 
         # The hidden iframe is torn down after the run
