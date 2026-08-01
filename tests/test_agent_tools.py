@@ -25,6 +25,7 @@ def _tools_by_name():
 async def test_app_edit_agent_tools_are_registered():
     tools = _tools_by_name()
     assert set(tools) == {
+        "app_list",
         "app_create",
         "app_view",
         "app_str_replace",
@@ -34,6 +35,12 @@ async def test_app_edit_agent_tools_are_registered():
         "app_debug",
     }
     assert tools["app_edit"].input_schema["required"] == ["app_id", "edits"]
+    assert tools["app_list"].input_schema["properties"]["limit"] == {
+        "type": "integer",
+        "description": "Maximum number of apps to return; defaults to 10",
+        "minimum": 1,
+        "maximum": 20,
+    }
     assert "params is an optional object of named SQL parameters" in (
         tools["app_create"].description
     )
@@ -42,6 +49,186 @@ async def test_app_edit_agent_tools_are_registered():
     assert "result.rows[0].count" in tools["app_create"].description
     assert "Do not use result[0]." in tools["app_create"].description
     assert "unless" not in tools["app_create"].description
+
+
+@pytest.mark.asyncio
+async def test_app_list_agent_tool_only_returns_editable_stored_apps():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"edit-app": {"id": "alice"}}},
+    )
+    registry = Registry(datasette)
+    owned = await registry.create_stored_app(
+        actor_id="alice",
+        name="Owned app",
+        description="Alice owns this",
+        html="<h1>Owned</h1>",
+    )
+    shared = await registry.create_stored_app(
+        actor_id="bob",
+        name="Shared app",
+        description="Alice has configured edit access",
+        html="<h1>Shared</h1>",
+    )
+    await registry.set_access_mode(shared["id"], "not-private", actor_id="bob")
+    private = await registry.create_stored_app(
+        actor_id="bob",
+        name="Bob's private app",
+        description="Not editable by Alice",
+        html="<h1>Private</h1>",
+    )
+    deleted = await registry.create_stored_app(
+        actor_id="alice",
+        name="Deleted app",
+        description="No longer available",
+        html="<h1>Deleted</h1>",
+    )
+    await registry.delete_stored_app(deleted["id"], actor_id="alice")
+    await registry.add_app(
+        id="plugin:external",
+        name="External app",
+        description="Registered by another plugin",
+        path="/-/external",
+        source="plugin",
+    )
+    await datasette.invoke_startup()
+
+    tools = _tools_by_name()
+    result = json.loads(
+        await tools["app_list"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+        )
+    )
+
+    assert {app["app_id"] for app in result["apps"]} == {
+        owned["id"],
+        shared["id"],
+    }
+    by_id = {app["app_id"]: app for app in result["apps"]}
+    assert by_id[owned["id"]] == {
+        "app_id": owned["id"],
+        "name": "Owned app",
+        "description": "Alice owns this",
+        "current_version": 1,
+        "updated_at": owned["updated_at"],
+        "owned_by_current_actor": True,
+    }
+    assert by_id[shared["id"]]["owned_by_current_actor"] is False
+    assert private["id"] not in by_id
+    assert deleted["id"] not in by_id
+    assert "plugin:external" not in by_id
+    assert result["query"] is None
+    assert result["returned_count"] == 2
+    assert result["has_more"] is False
+
+
+@pytest.mark.asyncio
+async def test_app_list_agent_tool_searches_and_ranks_exact_name_first():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    description_match = await registry.create_stored_app(
+        actor_id="alice",
+        name="Task board",
+        description="A TODO list for the team",
+        html="",
+    )
+    exact_match = await registry.create_stored_app(
+        actor_id="alice",
+        name="TODO",
+        description="Personal tasks",
+        html="",
+    )
+    await datasette.invoke_startup()
+
+    result = json.loads(
+        await _tools_by_name()["app_list"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+            query="todo",
+        )
+    )
+
+    assert [app["app_id"] for app in result["apps"]] == [
+        exact_match["id"],
+        description_match["id"],
+    ]
+    assert result["query"] == "todo"
+
+
+@pytest.mark.asyncio
+async def test_app_list_agent_tool_applies_limit_after_permission_filtering():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    for index in range(12):
+        await registry.create_stored_app(
+            actor_id="bob",
+            name=f"Bob app {index}",
+            description="",
+            html="",
+        )
+    alice_apps = []
+    for index in range(3):
+        alice_apps.append(
+            await registry.create_stored_app(
+                actor_id="alice",
+                name=f"Alice app {index}",
+                description="",
+                html="",
+            )
+        )
+    await datasette.invoke_startup()
+
+    result = json.loads(
+        await _tools_by_name()["app_list"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+            limit=2,
+        )
+    )
+
+    assert len(result["apps"]) == 2
+    assert {app["app_id"] for app in result["apps"]}.issubset(
+        {app["id"] for app in alice_apps}
+    )
+    assert result["returned_count"] == 2
+    assert result["has_more"] is True
+
+
+@pytest.mark.asyncio
+async def test_app_list_agent_tool_prioritizes_pinned_apps_without_query():
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"edit-app": {"id": "alice"}}},
+    )
+    registry = Registry(datasette)
+    pinned = await registry.create_stored_app(
+        actor_id="bob",
+        name="Pinned shared app",
+        description="",
+        html="",
+    )
+    await registry.set_access_mode(pinned["id"], "not-private", actor_id="bob")
+    await registry.set_pinned("alice", pinned["id"], True)
+    owned = await registry.create_stored_app(
+        actor_id="alice",
+        name="Newer owned app",
+        description="",
+        html="",
+    )
+    await datasette.invoke_startup()
+
+    result = json.loads(
+        await _tools_by_name()["app_list"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+        )
+    )
+
+    assert [app["app_id"] for app in result["apps"]] == [
+        pinned["id"],
+        owned["id"],
+    ]
 
 
 @pytest.mark.asyncio

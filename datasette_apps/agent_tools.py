@@ -17,7 +17,7 @@ from .debug import (
     normalize_envelope,
 )
 from .permissions import AppResource, AppsResource
-from .registry import Registry
+from .registry import Registry, _fts_query
 
 APP_RUNTIME_API_GUIDANCE = (
     " Apps run in a sandboxed iframe. For data access, use "
@@ -34,6 +34,14 @@ APP_RUNTIME_API_GUIDANCE = (
 
 
 APP_TOOL_DESCRIPTIONS = {
+    "list": (
+        "List or search stored Datasette apps that the current user can edit. "
+        "Use this before app_view or app_edit when the user identifies an app "
+        "by name or description but no app_id is known. Pass only identifying "
+        "words from the app name or description; omit query to list recently "
+        "used editable apps. If several apps plausibly match, ask the user "
+        "which one. If none match, do not assume the user wants a new app."
+    ),
     "create": (
         "Create a new stored Datasette HTML app. Use this when the user asks "
         "you to build a new app and you do not already have an app_id."
@@ -263,6 +271,128 @@ async def _app_create(
     )
 
 
+async def _app_list(datasette, actor, query=None, limit=10):
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return _error("limit must be an integer between 1 and 20")
+    if limit < 1 or limit > 20:
+        return _error("limit must be an integer between 1 and 20")
+
+    await Registry(datasette).ensure_tables()
+    allowed_sql, allowed_params = await datasette.allowed_resources_sql(
+        action="edit-app", actor=actor
+    )
+    query = query.strip() if isinstance(query, str) else None
+    actor_id = _actor_id(actor)
+    params = dict(allowed_params)
+    params.update(
+        {
+            "current_actor_id": actor_id,
+            "fetch_limit": limit + 1,
+        }
+    )
+
+    join_search = ""
+    search_filter = ""
+    search_order = ""
+    if query:
+        fts_query = _fts_query(query)
+        if not fts_query:
+            return json.dumps(
+                {
+                    "query": query,
+                    "apps": [],
+                    "returned_count": 0,
+                    "has_more": False,
+                }
+            )
+        join_search = "JOIN apps_fts ON apps.rowid = apps_fts.rowid"
+        search_filter = "AND apps_fts MATCH :fts_query"
+        search_order = """
+            CASE
+                WHEN lower(apps.name) = lower(:raw_query) THEN 0
+                WHEN lower(apps.name) LIKE lower(:name_prefix) THEN 1
+                ELSE 2
+            END,
+            bm25(apps_fts, 10.0, 1.0, 0.0),
+        """
+        params.update(
+            {
+                "fts_query": fts_query,
+                "raw_query": query,
+                "name_prefix": query + "%",
+            }
+        )
+
+    rows = (
+        await datasette.get_internal_database().execute(
+            """
+            WITH allowed_apps AS (
+                {allowed_sql}
+            )
+            SELECT DISTINCT
+                apps.id,
+                apps.name,
+                apps.description,
+                apps.current_version,
+                apps.updated_at,
+                CASE
+                    WHEN :current_actor_id IS NOT NULL
+                     AND apps.actor_id = :current_actor_id THEN 1
+                    ELSE 0
+                END AS owned_by_current_actor,
+                app_user_state.pinned_at,
+                app_user_state.last_accessed_at
+            FROM apps
+            JOIN allowed_apps
+              ON allowed_apps.parent = 'apps'
+             AND allowed_apps.child = apps.id
+            {join_search}
+            LEFT JOIN app_user_state
+              ON app_user_state.app_id = apps.id
+             AND app_user_state.actor_id = :current_actor_id
+            WHERE apps.deleted_at IS NULL
+              AND apps.external = 0
+              {search_filter}
+            ORDER BY
+                {search_order}
+                app_user_state.pinned_at IS NOT NULL DESC,
+                app_user_state.last_accessed_at DESC,
+                apps.updated_at DESC,
+                apps.id
+            LIMIT :fetch_limit
+            """.format(
+                allowed_sql=allowed_sql,
+                join_search=join_search,
+                search_filter=search_filter,
+                search_order=search_order,
+            ),
+            params,
+        )
+    ).rows
+    has_more = len(rows) > limit
+    apps = [
+        {
+            "app_id": row["id"],
+            "name": row["name"],
+            "description": row["description"],
+            "current_version": row["current_version"],
+            "updated_at": row["updated_at"],
+            "owned_by_current_actor": bool(row["owned_by_current_actor"]),
+        }
+        for row in rows[:limit]
+    ]
+    return json.dumps(
+        {
+            "query": query,
+            "apps": apps,
+            "returned_count": len(apps),
+            "has_more": has_more,
+        }
+    )
+
+
 async def _with_app_edit_permission(datasette, actor, app_id, callback):
     if not await _can_edit_app(datasette, actor, app_id):
         return _error("Permission denied: edit-app", app_id=app_id)
@@ -400,6 +530,29 @@ def get_app_edit_tools(AgentTool, datasette=None):
         )
 
     return [
+        AgentTool(
+            name="app_list",
+            description=APP_TOOL_DESCRIPTIONS["list"],
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Optional identifying words from the app name or "
+                            "description"
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of apps to return; defaults to 10",
+                        "minimum": 1,
+                        "maximum": 20,
+                    },
+                },
+            },
+            fn=_app_list,
+        ),
         AgentTool(
             name="app_create",
             description=APP_TOOL_DESCRIPTIONS["create"],
