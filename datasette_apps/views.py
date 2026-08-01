@@ -716,12 +716,17 @@ async def _running_debug_job_or_403(datasette, request):
 
 
 async def debug_frame(datasette, request):
+    """Returns the debug run's app document as JSON, never as text/html:
+    the untrusted app HTML must only ever execute inside the harness's
+    sandboxed srcdoc iframe, so no endpoint may serve it in a form a
+    browser would render on direct navigation."""
     job = await _running_debug_job_or_403(datasette, request)
+    _require_debug_job_actor(request, job)
     token = request.args.get("token") or ""
-    # The browser-task claim payload is the only place the frame token
-    # is handed out, so a valid token proves this load belongs to the
-    # claimed run. The sandboxed iframe request may arrive without
-    # credentials; the capability URL stands in for the actor check.
+    # The harness fetches this same-origin with credentials, so the
+    # actor check above is the primary gate; the token (handed out only
+    # through the browser-task claim payload) additionally binds the
+    # request to the claimed run.
     if not secrets.compare_digest(token, job["config"]["frame_token"]):
         raise Forbidden("Debug frame is not available")
     registry = Registry(datasette)
@@ -734,7 +739,13 @@ async def debug_frame(datasette, request):
         csp,
         iframe_bridge_script(job["config"]["channel_token"], debug=True),
     )
-    return Response.html(document, headers={"Cache-Control": "no-store"})
+    return Response.json(
+        {"ok": True, "document": document},
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 async def debug_query(datasette, request):

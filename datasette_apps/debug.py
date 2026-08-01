@@ -448,13 +448,10 @@ _HARNESS_HTML = """<div class="datasette-app-debug-harness"></div>
     });
   }
 
-  agent.claimTask(taskId).then(function(claim) {
-    if (!claim || !claim.ok) {
-      // Another tab claimed it, or the task already finished or
-      // expired: stand down.
+  function renderFrame(document_) {
+    if (finished) {
       return;
     }
-    payload = claim.payload;
     window.addEventListener("message", acceptBridgePort);
     iframe = document.createElement("iframe");
     iframe.setAttribute("sandbox", "allow-scripts allow-forms");
@@ -465,8 +462,21 @@ _HARNESS_HTML = """<div class="datasette-app-debug-harness"></div>
       "opacity: 0; pointer-events: none;";
     iframe.style.width = payload.viewport.width + "px";
     iframe.style.height = payload.viewport.height + "px";
-    iframe.src = payload.frame_url;
+    // srcdoc, matching how stored apps render in production: the
+    // untrusted document never has an addressable URL a browser could
+    // load outside the sandbox.
+    iframe.srcdoc = document_;
     document.body.appendChild(iframe);
+  }
+
+  agent.claimTask(taskId).then(function(claim) {
+    if (!claim || !claim.ok) {
+      // Another tab claimed it, or the task already finished or
+      // expired: stand down.
+      return;
+    }
+    payload = claim.payload;
+    // Started before the document fetch so a hung fetch still times out
     deadlineTimer = setTimeout(function() {
       finish({
         ok: false,
@@ -476,6 +486,25 @@ _HARNESS_HTML = """<div class="datasette-app-debug-harness"></div>
         timed_out: true
       });
     }, Math.max(1000, payload.timeout_ms));
+    fetch(payload.frame_url, {credentials: "same-origin"}).then(
+      function(response) {
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        return response.json();
+      }
+    ).then(function(body) {
+      renderFrame(String(body.document || ""));
+    }).catch(function(error) {
+      finish({
+        ok: false,
+        error: {
+          message: "Failed to load debug frame: " +
+            String((error && error.message) || error)
+        },
+        timed_out: false
+      });
+    });
   }).catch(function() {
   });
 })();

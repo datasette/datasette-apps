@@ -131,30 +131,44 @@ async def test_frame_serves_job_revision_with_debug_bridge():
 
     frame_path = f"/-/apps/debug/{job['id']}/frame"
     frame_url = debug_task_payload(datasette, job)["frame_url"]
+    actor = {"id": "alice"}
 
-    response = await datasette.client.get(frame_url)
+    response = await datasette.client.get(frame_url, actor=actor)
     assert response.status_code == 200
-    assert "<h1>Version one</h1>" in response.text
-    assert "<h1>Version two</h1>" not in response.text
-    assert 'http-equiv="Content-Security-Policy"' in response.text
-    assert "datasette-app-debug-eval" in response.text
-    assert "waitFor" in response.text
-    assert job["config"]["channel_token"] in response.text
+    # Untrusted app HTML must never come back as text/html: the harness
+    # injects the document into a sandboxed srcdoc iframe, and a JSON
+    # response is inert if the URL is ever opened directly in a browser
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    body = response.json()
+    assert body["ok"] is True
+    document = body["document"]
+    assert "<h1>Version one</h1>" in document
+    assert "<h1>Version two</h1>" not in document
+    assert 'http-equiv="Content-Security-Policy"' in document
+    assert "datasette-app-debug-eval" in document
+    assert "waitFor" in document
+    assert job["config"]["channel_token"] in document
     assert response.headers["cache-control"] == "no-store"
 
-    # The frame token is the capability: no token or a wrong token is
-    # refused, and unknown jobs 404
-    assert (await datasette.client.get(frame_path)).status_code == 403
+    # Only the actor who created the job may fetch the document; the
+    # frame token additionally binds the request to the claimed run.
+    # Unknown jobs 404.
+    assert (await datasette.client.get(frame_url)).status_code == 403
     assert (
-        await datasette.client.get(f"{frame_path}?token=wrong")
+        await datasette.client.get(frame_url, actor={"id": "mallory"})
+    ).status_code == 403
+    assert (await datasette.client.get(frame_path, actor=actor)).status_code == 403
+    assert (
+        await datasette.client.get(f"{frame_path}?token=wrong", actor=actor)
     ).status_code == 403
     assert (
-        await datasette.client.get("/-/apps/debug/nope/frame?token=x")
+        await datasette.client.get("/-/apps/debug/nope/frame?token=x", actor=actor)
     ).status_code == 404
 
     # Once the job has its result the frame stops serving
     await complete_debug_job(datasette, job["id"], {"ok": True})
-    assert (await datasette.client.get(frame_url)).status_code == 403
+    assert (await datasette.client.get(frame_url, actor=actor)).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -166,7 +180,9 @@ async def test_frame_and_query_refuse_expired_jobs():
     await _backdate_job(datasette, job["id"], JOB_EXPIRY_SECONDS + 60)
 
     frame_url = debug_task_payload(datasette, job)["frame_url"]
-    assert (await datasette.client.get(frame_url)).status_code == 403
+    assert (
+        await datasette.client.get(frame_url, actor={"id": "alice"})
+    ).status_code == 403
 
     query = await datasette.client.post(
         f"/-/apps/debug/{job['id']}/query",
@@ -186,9 +202,7 @@ async def test_query_endpoint_enforces_app_allowlists_and_actor():
     query_path = f"/-/apps/debug/{job['id']}/query"
     body = {"database": "_memory", "sql": "select 1 as one"}
 
-    response = await datasette.client.post(
-        query_path, actor={"id": "alice"}, json=body
-    )
+    response = await datasette.client.post(query_path, actor={"id": "alice"}, json=body)
     assert response.status_code == 200
     assert response.json() == {
         "ok": True,
@@ -340,8 +354,6 @@ async def test_stored_app_view_has_no_debug_eval_channel():
     datasette = Datasette(memory=True)
     await datasette.invoke_startup()
     app = await _make_app(datasette)
-    response = await datasette.client.get(
-        f"/-/apps/{app['id']}", actor={"id": "alice"}
-    )
+    response = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "alice"})
     assert response.status_code == 200
     assert "datasette-app-debug-eval" not in response.text
