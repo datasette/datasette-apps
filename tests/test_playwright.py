@@ -726,6 +726,39 @@ def test_iframe_link_click_shows_parent_confirmation_modal(tmp_path):
         assert popup.url == "https://example.com/docs?from=app#section"
 
 
+def test_long_iframe_link_url_does_not_overflow_confirmation_modal(tmp_path):
+    long_url = "https://example.com/?query=" + ("encoded%20value%20" * 500)
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app(
+            f"""<!doctype html>
+<a id="external-link" href="{long_url}">Open long URL</a>""",
+            name="Long external link app",
+        )
+    )
+
+    with server, _browser_page() as page:
+        page.set_viewport_size({"width": 800, "height": 500})
+        page.goto(server.app_url(app))
+        _iframe(page).locator("#external-link").click()
+
+        modal = page.locator(".datasette-app-link-modal")
+        modal.wait_for(state="visible")
+        dialog_box = modal.locator(".datasette-app-link-dialog").bounding_box()
+        assert dialog_box is not None
+        assert dialog_box["y"] >= 0
+        assert dialog_box["y"] + dialog_box["height"] <= 500
+
+        url_preview = modal.locator(".datasette-app-link-url")
+        assert url_preview.evaluate(
+            "element => element.scrollHeight > element.clientHeight"
+        )
+        open_button_box = modal.locator("button", has_text="Open link").bounding_box()
+        assert open_button_box is not None
+        assert open_button_box["y"] >= 0
+        assert open_button_box["y"] + open_button_box["height"] <= 500
+
+
 def test_fullscreen_parent_bridge_ui_uses_plugin_stylesheet(tmp_path):
     server = DatasetteServer(tmp_path)
     app = asyncio.run(
