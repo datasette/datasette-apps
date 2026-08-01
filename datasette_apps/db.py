@@ -103,6 +103,25 @@ CREATE TABLE IF NOT EXISTS app_csp_origins (
 CREATE INDEX IF NOT EXISTS idx_app_csp_origins_app
     ON app_csp_origins(app_id, directive);
 
+CREATE TABLE IF NOT EXISTS _app_debug_jobs (
+    id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL,
+    conversation_id TEXT,
+    call_key TEXT,
+    app_id TEXT NOT NULL REFERENCES apps(id),
+    version INTEGER NOT NULL,
+    javascript TEXT NOT NULL,
+    config TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL,
+    result TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    CHECK (status IN ('pending', 'completed', 'expired'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_debug_jobs_call
+    ON _app_debug_jobs(conversation_id, call_key, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS app_user_state (
     actor_id TEXT NOT NULL,
     app_id TEXT NOT NULL REFERENCES apps(id),

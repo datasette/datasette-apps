@@ -6,6 +6,16 @@ import json
 from datasette_agent_edit import EditError, EditToolset, Editable, NotFound
 
 from .csp import configured_csp_allowlist, resolve_csp_origins
+from .debug import (
+    BROWSER_TASK_SLACK_MS,
+    build_debug_harness_html,
+    cap_envelope,
+    complete_debug_job,
+    create_debug_job,
+    debug_task_payload,
+    get_debug_job_for_call,
+    normalize_envelope,
+)
 from .permissions import AppResource, AppsResource
 from .registry import Registry
 
@@ -49,6 +59,29 @@ APP_TOOL_DESCRIPTIONS = {
         "is saved as one app revision." + APP_RUNTIME_API_GUIDANCE
     ),
     "render": "Render links to the current stored Datasette app after editing.",
+    "debug": (
+        "Run a JavaScript debug script inside a live sandboxed render of a "
+        "stored Datasette app and return its result plus every error and log "
+        "the app produced while rendering. The app's most recent revision "
+        "loads invisibly in the user's open browser tab, so this requires an "
+        "interactive conversation and edit permission for that app. The "
+        "javascript argument is the body of an async function executed in "
+        "the app's global scope; its awaited return value is the result and "
+        "must be JSON-serializable - return .textContent or measurements, "
+        "not DOM elements. Apps render asynchronously, so wait for readiness "
+        "with await debug.waitFor(fn, {timeout, interval}), which polls fn "
+        "until it returns a truthy value, for example await "
+        'debug.waitFor(() => document.querySelector("#chart")). Layout '
+        "measurements need the same treatment: the hidden frame's first "
+        "layout can lag DOM readiness, so before reading sizes wait with "
+        "await debug.waitFor(() => window.innerWidth). Captured "
+        "events include JavaScript errors, unhandled rejections, CSP "
+        "violations, failed fetches, console output and datasette.query() "
+        "calls, from page load through script completion. Caveat: synthetic "
+        "events dispatched by the debug script have isTrusted: false, so a "
+        "few native browser behaviors (external-link interception, popup "
+        "allowances) will not trigger."
+    ),
 }
 
 
@@ -259,6 +292,72 @@ def _csp_origins_schema_description(datasette=None):
     )
 
 
+async def _app_debug(
+    datasette, actor, context, app_id, javascript, viewport=None, timeout_ms=None
+):
+    if not await _can_edit_app(datasette, actor, app_id):
+        return _error("Permission denied: edit-app", app_id=app_id)
+    conversation_id = getattr(context, "conversation_id", None)
+    call_key = getattr(context, "call_key", None)
+    # Re-executing a suspended call (after its browser task finishes)
+    # must find the job it already created, not create an orphan row. A
+    # completed job means this is a fresh identical call: run fresh.
+    job = await get_debug_job_for_call(datasette, conversation_id, call_key)
+    if (
+        job is None
+        or job["status"] != "pending"
+        or job["app_id"] != app_id
+        or job["javascript"] != javascript
+    ):
+        try:
+            job = await create_debug_job(
+                datasette,
+                actor_id=_actor_id(actor),
+                app_id=app_id,
+                javascript=javascript,
+                viewport=viewport,
+                timeout_ms=timeout_ms,
+                conversation_id=conversation_id,
+                call_key=call_key,
+            )
+        except ValueError as e:
+            return _error(str(e), app_id=app_id)
+    app = await Registry(datasette).get_app(app_id)
+    try:
+        outcome = await context.browser_task(
+            build_debug_harness_html(),
+            payload=debug_task_payload(datasette, job),
+            label="Running debug script against {}".format(
+                (app and app["name"]) or app_id
+            ),
+            timeout_ms=job["config"]["timeout_ms"] + BROWSER_TASK_SLACK_MS,
+        )
+    except Exception as e:
+        # Matched by name so datasette-agent stays an optional dependency;
+        # BrowserTaskPending (an llm.PauseChain) must keep propagating.
+        if e.__class__.__name__ == "BrowserTasksNotSupported":
+            return _error(
+                "app_debug requires an interactive conversation with the "
+                "chat open in a browser; it is not available here",
+                app_id=app_id,
+            )
+        raise
+    if not isinstance(outcome, dict):
+        outcome = {}
+    envelope = normalize_envelope(outcome)
+    # The audit record: what ran and what came back
+    await complete_debug_job(datasette, job["id"], envelope)
+    payload = {
+        "app_id": app_id,
+        "version": job["version"],
+        "outcome": outcome.get("outcome") or "completed",
+    }
+    payload.update(cap_envelope(envelope))
+    if payload.get("error") is None:
+        payload.pop("error", None)
+    return json.dumps(payload)
+
+
 def get_app_edit_tools(AgentTool, datasette=None):
     async def app_view(datasette, actor, app_id, view_range=""):
         return await _with_app_edit_permission(
@@ -464,5 +563,47 @@ def get_app_edit_tools(AgentTool, datasette=None):
                 "required": ["app_id"],
             },
             fn=app_render,
+        ),
+        AgentTool(
+            name="app_debug",
+            description=APP_TOOL_DESCRIPTIONS["debug"],
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "app_id": {
+                        "type": "string",
+                        "description": "The stored Datasette app ID",
+                    },
+                    "javascript": {
+                        "type": "string",
+                        "description": (
+                            "Body of an async function executed inside the "
+                            "app iframe; its awaited return value must be "
+                            "JSON-serializable"
+                        ),
+                    },
+                    "viewport": {
+                        "type": "object",
+                        "description": (
+                            "Optional iframe size, e.g. "
+                            '{"width": 375, "height": 812}; defaults to '
+                            "1280x800"
+                        ),
+                        "properties": {
+                            "width": {"type": "integer"},
+                            "height": {"type": "integer"},
+                        },
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "description": (
+                            "Hard cap in milliseconds on the whole run; "
+                            "defaults to 15000, maximum 60000"
+                        ),
+                    },
+                },
+                "required": ["app_id", "javascript"],
+            },
+            fn=_app_debug,
         ),
     ]

@@ -18,6 +18,11 @@ from .csp import (
     resolve_csp_origins,
 )
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
+from .debug import (
+    debug_job_is_expired,
+    expire_debug_job,
+    get_debug_job,
+)
 from .permissions import AppResource, AppsResource
 from .prompt import build_llm_prompt_data, stored_query_options
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
@@ -674,6 +679,86 @@ async def app_query(datasette, request):
                 datasette,
                 app,
                 actor,
+                body["database"],
+                body["sql"],
+                body.get("params"),
+            )
+        return Response.json({"ok": True, "result": result})
+    except (KeyError, json.JSONDecodeError) as e:
+        return Response.json({"ok": False, "error": f"Invalid request: {e}"})
+    except AppQueryError as e:
+        return Response.json({"ok": False, "error": str(e)})
+
+
+async def _debug_job_or_404(datasette, request):
+    job = await get_debug_job(datasette, request.url_vars["job_id"])
+    if job is None:
+        raise NotFound("Debug job not found")
+    return job
+
+
+def _require_debug_job_actor(request, job):
+    if not request.actor or _actor_id(request.actor) != job["actor_id"]:
+        raise Forbidden("Debug jobs are only accessible to the actor who created them")
+
+
+async def _running_debug_job_or_403(datasette, request):
+    """The job must still be awaiting its result: once the resumed tool
+    call records the envelope (or the window expires) the frame and
+    query endpoints stop serving."""
+    job = await _debug_job_or_404(datasette, request)
+    if job["status"] == "pending" and debug_job_is_expired(job):
+        await expire_debug_job(datasette, job["id"])
+        job = await get_debug_job(datasette, job["id"])
+    if job["status"] != "pending":
+        raise Forbidden("Debug job is not running")
+    return job
+
+
+async def debug_frame(datasette, request):
+    job = await _running_debug_job_or_403(datasette, request)
+    token = request.args.get("token") or ""
+    # The browser-task claim payload is the only place the frame token
+    # is handed out, so a valid token proves this load belongs to the
+    # claimed run. The sandboxed iframe request may arrive without
+    # credentials; the capability URL stands in for the actor check.
+    if not secrets.compare_digest(token, job["config"]["frame_token"]):
+        raise Forbidden("Debug frame is not available")
+    registry = Registry(datasette)
+    version = await registry.get_version(job["app_id"], job["version"])
+    if version is None:
+        raise NotFound("App revision not found")
+    csp = build_csp(await registry.get_csp_origins(job["app_id"]))
+    document = build_app_srcdoc(
+        version["html"],
+        csp,
+        iframe_bridge_script(job["config"]["channel_token"], debug=True),
+    )
+    return Response.html(document, headers={"Cache-Control": "no-store"})
+
+
+async def debug_query(datasette, request):
+    job = await _running_debug_job_or_403(datasette, request)
+    _require_debug_job_actor(request, job)
+    app = await Registry(datasette).get_app(job["app_id"])
+    if app is None:
+        raise NotFound("App not found")
+    try:
+        body = json.loads((await request.post_body()).decode("utf-8") or "{}")
+        if "query" in body:
+            result = await run_app_stored_query(
+                datasette,
+                app,
+                request.actor,
+                body["database"],
+                body["query"],
+                body.get("params"),
+            )
+        else:
+            result = await run_app_query(
+                datasette,
+                app,
+                request.actor,
                 body["database"],
                 body["sql"],
                 body.get("params"),
