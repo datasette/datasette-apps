@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 
+from datasette.resources import QueryResource
 from datasette_agent_edit import EditError, EditToolset, Editable, NotFound
 
 from .csp import configured_csp_allowlist, resolve_csp_origins
@@ -67,6 +68,15 @@ APP_TOOL_DESCRIPTIONS = {
         "is saved as one app revision." + APP_RUNTIME_API_GUIDANCE
     ),
     "render": "Render links to the current stored Datasette app after editing.",
+    "add_stored_query": (
+        "Request that a stored (canned) query be added to a stored Datasette "
+        "app's allow-list, so the app can call it with await "
+        "datasette.storedQuery(database, query, params?). Use this when an "
+        "app needs a stored query that is not yet on its allow-list. The "
+        "user is shown the query details plus your rationale and must "
+        "approve before anything changes; if they decline, do not retry "
+        "unless they ask you to. Requires edit permission for that app."
+    ),
     "debug": (
         "Run a JavaScript debug script inside a live sandboxed render of a "
         "stored Datasette app and return its result plus every error and log "
@@ -389,6 +399,124 @@ async def _app_list(datasette, actor, query=None, limit=10):
             "apps": apps,
             "returned_count": len(apps),
             "has_more": has_more,
+        }
+    )
+
+
+def _add_stored_query_approval_html(app_name, key, stored_query, rationale):
+    rows = [
+        ("App", app_name),
+        ("Stored query", key),
+        ("Title", stored_query.title or ""),
+        ("Type", "write query" if stored_query.is_write else "read-only query"),
+        ("Parameters", ", ".join(stored_query.parameters or [])),
+    ]
+    details = "".join(
+        "<tr><th>{}</th><td>{}</td></tr>".format(
+            html.escape(label), html.escape(str(value))
+        )
+        for label, value in rows
+        if value
+    )
+    return (
+        '<table class="datasette-app-add-query-details">{}</table>'
+        "<p><strong>Why the assistant wants this:</strong> {}</p>"
+        "<pre>{}</pre>".format(
+            details, html.escape(rationale), html.escape(stored_query.sql)
+        )
+    )
+
+
+async def _app_add_stored_query(
+    datasette, actor, context, app_id, database, query, rationale
+):
+    if not await _can_edit_app(datasette, actor, app_id):
+        return _error("Permission denied: edit-app", app_id=app_id)
+    registry = Registry(datasette)
+    app = await registry.get_app(app_id)
+    if app is None or app["external"]:
+        return _error("App not found: {}".format(app_id), app_id=app_id)
+
+    key = "{}/{}".format(database, query)
+    stored_query = await datasette.get_query(database, query)
+    if stored_query is None:
+        return _error("Stored query not found: {}".format(key), app_id=app_id)
+    if not await datasette.allowed(
+        action="view-query",
+        resource=QueryResource(database=database, query=query),
+        actor=actor,
+    ):
+        return _error(
+            "Permission denied: you cannot view the stored query {}".format(key),
+            app_id=app_id,
+        )
+
+    existing = await registry.get_stored_queries(app_id)
+    if key in existing:
+        return json.dumps(
+            {
+                "ok": True,
+                "app_id": app_id,
+                "stored_query": key,
+                "stored_queries": existing,
+                "message": "That stored query is already assigned to this app.",
+            }
+        )
+
+    try:
+        approved = await context.ask_user(
+            'Allow app "{}" to run the stored query "{}"?'.format(
+                app["name"] or app_id, key
+            ),
+            html=_add_stored_query_approval_html(
+                app["name"] or app_id, key, stored_query, rationale
+            ),
+        )
+    except Exception as e:
+        # Matched by name so datasette-agent stays an optional dependency
+        if e.__class__.__name__ == "QuestionsNotSupported":
+            return _error(
+                "Assigning a stored query requires an interactive "
+                "conversation so the user can approve it; that is not "
+                "available here",
+                app_id=app_id,
+            )
+        raise
+    if not approved:
+        return json.dumps(
+            {
+                "ok": False,
+                "cancelled": True,
+                "app_id": app_id,
+                "message": (
+                    "The user declined to give this app access to that " "stored query."
+                ),
+            }
+        )
+
+    await registry.set_stored_queries(
+        app_id, existing + [key], actor_id=_actor_id(actor)
+    )
+    stored_queries = await registry.get_stored_queries(app_id)
+    path = datasette.urls.path(app["path"])
+    return json.dumps(
+        {
+            "ok": True,
+            "app_id": app_id,
+            "stored_query": key,
+            "stored_queries": stored_queries,
+            "message": (
+                "The app can now call this query with await "
+                'datasette.storedQuery("{}", "{}")'.format(database, query)
+            ),
+            "_html": (
+                "<p>Added stored query <code>{}</code> to "
+                '<a href="{}">{}</a>.</p>'.format(
+                    html.escape(key),
+                    html.escape(path, quote=True),
+                    html.escape(app["name"] or app_id),
+                )
+            ),
         }
     )
 
@@ -716,6 +844,37 @@ def get_app_edit_tools(AgentTool, datasette=None):
                 "required": ["app_id"],
             },
             fn=app_render,
+        ),
+        AgentTool(
+            name="app_add_stored_query",
+            description=APP_TOOL_DESCRIPTIONS["add_stored_query"],
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "app_id": {
+                        "type": "string",
+                        "description": "The stored Datasette app ID",
+                    },
+                    "database": {
+                        "type": "string",
+                        "description": "Database containing the stored query",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Name of the stored query",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": (
+                            "One or two sentences explaining why the app "
+                            "needs this stored query, shown to the user in "
+                            "the approval dialog"
+                        ),
+                    },
+                },
+                "required": ["app_id", "database", "query", "rationale"],
+            },
+            fn=_app_add_stored_query,
         ),
         AgentTool(
             name="app_debug",
