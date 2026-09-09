@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 
+from datasette.resources import QueryResource
 from datasette_agent_edit import EditError, EditToolset, Editable, NotFound
 
 from .csp import configured_csp_allowlist, resolve_csp_origins
@@ -44,8 +45,19 @@ APP_TOOL_DESCRIPTIONS = {
     ),
     "create": (
         "Create a new stored Datasette HTML app. Use this when the user asks "
-        "you to build a new app and you do not already have an app_id."
-        + APP_RUNTIME_API_GUIDANCE
+        "you to build a new app and you do not already have an app_id. "
+        "Passing stored_queries pauses to ask the user to approve that "
+        "access before the app is created, so mention which stored queries "
+        "the app needs and why before calling this." + APP_RUNTIME_API_GUIDANCE
+    ),
+    "set_stored_queries": (
+        "Replace the allow-list of stored queries an existing stored "
+        "Datasette app may call with datasette.storedQuery(). Pass the "
+        "complete list as database/query strings; any query not included is "
+        "removed from the app. Granting a query the app did not already have "
+        "pauses to ask the user to approve that access, so mention which "
+        "stored queries the app needs and why before calling this. Requires "
+        "edit permission for that app."
     ),
     "view": (
         "View the current HTML source for a stored Datasette app, with "
@@ -209,6 +221,163 @@ def _render_created_app(app, view_path, edit_path):
     )
 
 
+STORED_QUERY_APPROVAL_UNAVAILABLE = (
+    "Granting an app access to stored queries requires the user's approval, "
+    "which is not available in this context. The user can allow stored "
+    "queries themselves on the app's edit page."
+)
+
+
+def _split_stored_query_key(value):
+    """Split a database/query string; raises ValueError if malformed."""
+    if not isinstance(value, str):
+        raise ValueError("Stored queries must be database/query strings")
+    value = value.strip()
+    if "/" in value:
+        database_name, query_name = value.split("/", 1)
+        if database_name and query_name:
+            return database_name, query_name
+    raise ValueError('Stored query "{}" must be a database/query string'.format(value))
+
+
+async def resolve_stored_queries(datasette, actor, stored_queries):
+    """Validate the database/query strings a model asked to allow-list.
+
+    Returns [{"key": "db/query", "query": StoredQuery}, ...] sorted by key
+    with duplicates dropped. Raises ValueError naming every entry that is
+    malformed, missing, or not viewable by the actor - an app can only be
+    granted queries the person approving the grant could already see.
+    """
+    resolved = []
+    seen = set()
+    problems = []
+    for value in stored_queries or []:
+        try:
+            database_name, query_name = _split_stored_query_key(value)
+        except ValueError as e:
+            problems.append(str(e))
+            continue
+        key = f"{database_name}/{query_name}"
+        if key in seen:
+            continue
+        seen.add(key)
+        stored_query = await datasette.get_query(database_name, query_name)
+        if stored_query is None or not await datasette.allowed(
+            action="view-query",
+            resource=QueryResource(database=database_name, query=query_name),
+            actor=actor,
+        ):
+            problems.append(
+                'Stored query "{}" does not exist or you cannot view it'.format(key)
+            )
+            continue
+        resolved.append({"key": key, "query": stored_query})
+    if problems:
+        raise ValueError("; ".join(problems))
+    resolved.sort(key=lambda item: item["key"])
+    return resolved
+
+
+def _stored_query_summary(query):
+    parts = ["write query" if query.is_write else "read-only query"]
+    if query.parameters:
+        parts.append("parameters: " + ", ".join(query.parameters))
+    return ", ".join(parts)
+
+
+def _stored_query_access_prompt(app_name, granted):
+    return "Allow {} to run {} stored quer{}?".format(
+        app_name, len(granted), "y" if len(granted) == 1 else "ies"
+    )
+
+
+def _stored_query_access_html(app_name, granted, removed=()):
+    """Trusted HTML shown above the approval question: every query the app
+    would gain, with its SQL, so the user sees exactly what they grant."""
+    parts = [
+        '<div class="datasette-app-stored-query-approval">',
+        "<p><strong>{}</strong> will be able to run {} stored quer{} using "
+        "<code>datasette.storedQuery()</code>:</p>".format(
+            html.escape(app_name),
+            len(granted),
+            "y" if len(granted) == 1 else "ies",
+        ),
+    ]
+    for item in granted:
+        query = item["query"]
+        heading = "<code>{}</code>".format(html.escape(item["key"]))
+        if query.title:
+            heading += " {}".format(html.escape(query.title))
+        summary = html.escape(_stored_query_summary(query))
+        if query.is_write:
+            summary = "<strong>{}</strong>".format(summary)
+        parts.append("<p>{} ({})</p>".format(heading, summary))
+        if query.description:
+            parts.append("<p>{}</p>".format(html.escape(query.description)))
+        parts.append("<pre>{}</pre>".format(html.escape(query.sql)))
+    if removed:
+        parts.append(
+            "<p>Access will be removed for: {}</p>".format(
+                ", ".join("<code>{}</code>".format(html.escape(key)) for key in removed)
+            )
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _stored_query_access_text(app_name, granted, removed=()):
+    lines = [
+        "{} will be able to run {} stored quer{}:".format(
+            app_name, len(granted), "y" if len(granted) == 1 else "ies"
+        )
+    ]
+    for item in granted:
+        query = item["query"]
+        lines.append("")
+        heading = item["key"]
+        if query.title:
+            heading += " - " + query.title
+        lines.append("{} ({})".format(heading, _stored_query_summary(query)))
+        if query.description:
+            lines.append("  " + query.description)
+        lines.extend("  " + line for line in query.sql.splitlines())
+    if removed:
+        lines.append("")
+        lines.append("Access will be removed for: " + ", ".join(removed))
+    return "\n".join(lines)
+
+
+async def _ask_stored_query_approval(context, app_name, granted, removed=()):
+    """Ask the user to approve granting an app these stored queries.
+
+    Returns True or False. In an interactive conversation this suspends
+    the turn (QuestionPending propagates); when questions are unsupported
+    it returns an error string for the model instead.
+    """
+    if context is None:
+        return _error(STORED_QUERY_APPROVAL_UNAVAILABLE)
+    try:
+        approved = await context.ask_user(
+            _stored_query_access_prompt(app_name, granted),
+            html=_stored_query_access_html(app_name, granted, removed),
+            text=_stored_query_access_text(app_name, granted, removed),
+        )
+    except Exception as e:
+        # Matched by name so datasette-agent stays an optional dependency;
+        # QuestionPending (an llm.PauseChain) must keep propagating.
+        if e.__class__.__name__ == "QuestionsNotSupported":
+            return _error(STORED_QUERY_APPROVAL_UNAVAILABLE)
+        raise
+    return bool(approved)
+
+
+def _declined(message, app_id=None):
+    payload = {"ok": False, "cancelled": True, "message": message}
+    if app_id is not None:
+        payload["app_id"] = app_id
+    return json.dumps(payload)
+
+
 def _toolset(datasette, actor):
     return EditToolset(
         StoredAppHtmlStore(datasette, actor),
@@ -236,19 +405,40 @@ async def _app_create(
     sql_databases=None,
     stored_queries=None,
     csp_origins=None,
+    context=None,
 ):
     if not await _can_create_app(datasette, actor):
         return _error("Permission denied: create-app")
+    name = name or "Untitled app"
     try:
         csp_origins = await resolve_csp_origins(datasette, actor, csp_origins or [])
+        granted = await resolve_stored_queries(datasette, actor, stored_queries)
+    except ValueError as e:
+        return _error(str(e))
+    if granted:
+        # Letting an app run stored queries as the current user is a data
+        # access grant, so the user approves it explicitly. ask_user()
+        # replays its stored answer when this call re-executes after the
+        # user responds, so it must come before the app is created.
+        approved = await _ask_stored_query_approval(context, name, granted)
+        if approved is not True:
+            if isinstance(approved, str):
+                return approved
+            return _declined(
+                "The user declined to let this app run the requested stored "
+                "queries, so the app was not created. Ask the user how to "
+                "proceed - for example, call app_create again without "
+                "stored_queries."
+            )
+    try:
         app = await Registry(datasette).create_stored_app(
             actor_id=_actor_id(actor),
-            name=name or "Untitled app",
+            name=name,
             description=description or "",
             html=html or "",
             is_private=True if is_private is None else bool(is_private),
             sql_databases=sql_databases or [],
-            stored_queries=stored_queries or [],
+            stored_queries=[item["key"] for item in granted],
             csp_origins=csp_origins or [],
         )
     except ValueError as e:
@@ -258,6 +448,7 @@ async def _app_create(
             "app_id": app["id"],
             "name": app["name"],
             "version": app["current_version"],
+            "stored_queries": app["stored_queries"],
             "status": (
                 "Created app. The user can open it with the rendered View app "
                 "link above."
@@ -419,6 +610,78 @@ def _csp_origins_schema_description(datasette=None):
     return description + (
         ". Requires the apps-set-csp permission; no origin allow-list is "
         "configured, so users without that permission cannot set origins"
+    )
+
+
+async def _app_set_stored_queries(
+    datasette, actor, app_id, stored_queries, context=None
+):
+    if not await _can_edit_app(datasette, actor, app_id):
+        return _error("Permission denied: edit-app", app_id=app_id)
+    registry = Registry(datasette)
+    app = await registry.get_app(app_id)
+    if app is None or app["external"]:
+        return _error("Stored app not found", app_id=app_id)
+    try:
+        resolved = await resolve_stored_queries(datasette, actor, stored_queries)
+    except ValueError as e:
+        return _error(str(e), app_id=app_id)
+    current = await registry.get_stored_queries(app_id)
+    new_keys = [item["key"] for item in resolved]
+    granted = [item for item in resolved if item["key"] not in current]
+    removed = [key for key in current if key not in new_keys]
+    if not granted and not removed:
+        return json.dumps(
+            {
+                "app_id": app_id,
+                "stored_queries": new_keys,
+                "status": "No change: the app already had exactly these stored queries.",
+            }
+        )
+    if granted:
+        # Only new grants need approval - dropping access is not a
+        # data-access decision. ask_user() replays its stored answer when
+        # this call re-executes, so it must come before the update.
+        approved = await _ask_stored_query_approval(
+            context, app["name"] or app_id, granted, removed
+        )
+        if approved is not True:
+            if isinstance(approved, str):
+                return approved
+            return _declined(
+                "The user declined to let this app run the requested stored "
+                "queries, so its stored query access was left unchanged. Ask "
+                "the user how to proceed.",
+                app_id=app_id,
+            )
+    try:
+        await registry.set_stored_queries(app_id, new_keys, actor_id=_actor_id(actor))
+    except KeyError:
+        return _error("Stored app not found", app_id=app_id)
+    version = await registry.get_current_version(app_id)
+    return json.dumps(
+        {
+            "app_id": app_id,
+            "version": version["version"],
+            "stored_queries": new_keys,
+            "granted": [item["key"] for item in granted],
+            "removed": removed,
+            "status": "Updated stored query access; saved as app revision v{}.".format(
+                version["version"]
+            ),
+            "_html": _render_app(
+                Editable(
+                    ref=app_id,
+                    content="",
+                    metadata={
+                        "app_id": app_id,
+                        "name": app["name"],
+                        "path": datasette.urls.path(app["path"]),
+                    },
+                    version=version["version"],
+                )
+            )["_html"],
+        }
     )
 
 
@@ -586,8 +849,10 @@ def get_app_edit_tools(AgentTool, datasette=None):
                     "stored_queries": {
                         "type": "array",
                         "description": (
-                            "Optional stored queries this app may call, as "
-                            "database/query strings"
+                            "Optional stored queries this app may call with "
+                            "datasette.storedQuery(), as database/query "
+                            "strings. The user is asked to approve this "
+                            "access before the app is created."
                         ),
                         "items": {"type": "string"},
                     },
@@ -716,6 +981,31 @@ def get_app_edit_tools(AgentTool, datasette=None):
                 "required": ["app_id"],
             },
             fn=app_render,
+        ),
+        AgentTool(
+            name="app_set_stored_queries",
+            description=APP_TOOL_DESCRIPTIONS["set_stored_queries"],
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "app_id": {
+                        "type": "string",
+                        "description": "The stored Datasette app ID",
+                    },
+                    "stored_queries": {
+                        "type": "array",
+                        "description": (
+                            "The complete list of stored queries this app may "
+                            "call with datasette.storedQuery(), as "
+                            "database/query strings; an empty list removes all "
+                            "stored query access"
+                        ),
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["app_id", "stored_queries"],
+            },
+            fn=_app_set_stored_queries,
         ),
         AgentTool(
             name="app_debug",

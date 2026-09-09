@@ -71,6 +71,12 @@ Failed stored-query attempts, including attempts to call a query that is not all
 
 Stored query access is configured using a picker on the create and edit pages. The picker searches Datasette's `/-/queries.json?q=search-term` API and stores selected queries as `database-name/query-name` strings. Removing a query uses the `x` button next to that selected query. Additions and removals are not applied until the page is saved.
 
+### Agent tools
+
+If [datasette-agent](https://github.com/datasette/datasette-agent) is installed, this plugin registers tools that let the agent build and edit stored apps: `app_list`, `app_create`, `app_view`, `app_str_replace`, `app_insert`, `app_edit`, `app_render`, `app_set_stored_queries` and `app_debug`. These respect the same `create-app` and `edit-app` permissions as the web interface.
+
+Allowing an app to call stored queries is a data access grant, so the agent cannot do it on its own. When `app_create` is called with `stored_queries`, or `app_set_stored_queries` adds a query an app did not already have, the agent pauses and asks you to approve the grant in the chat. The question shows each query's name, title, description, parameters, whether it is a write query and its full SQL, plus any queries that would lose access. Approving creates the app or records a new app revision; declining leaves things unchanged and tells the agent to check with you. Queries that do not exist or that you cannot view are rejected before you are asked, and removing queries from an app does not require approval.
+
 ### Permissions
 
 The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, `delete-app`, `manage-app-access`, and `apps-set-csp`. Stored app owners can always view, edit, delete, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
