@@ -46,9 +46,10 @@ APP_TOOL_DESCRIPTIONS = {
     "create": (
         "Create a new stored Datasette HTML app. Use this when the user asks "
         "you to build a new app and you do not already have an app_id. "
-        "Passing stored_queries pauses to ask the user to approve that "
-        "access before the app is created, so mention which stored queries "
-        "the app needs and why before calling this." + APP_RUNTIME_API_GUIDANCE
+        "Passing stored_queries or csp_origins pauses to ask the user to "
+        "approve that access before the app is created, so mention which "
+        "stored queries and origins the app needs and why before calling "
+        "this." + APP_RUNTIME_API_GUIDANCE
     ),
     "set_stored_queries": (
         "Replace the allow-list of stored queries an existing stored "
@@ -58,6 +59,16 @@ APP_TOOL_DESCRIPTIONS = {
         "pauses to ask the user to approve that access, so mention which "
         "stored queries the app needs and why before calling this. Requires "
         "edit permission for that app."
+    ),
+    "set_csp_origins": (
+        "Replace the allow-list of exact https:// origins an existing stored "
+        "Datasette app may contact for scripts, styles, images, and fetch "
+        "requests. Pass the complete list; any origin not included is "
+        "removed from the app. Adding an origin the app did not already have "
+        "pauses to ask the user to approve it, because an allowed origin can "
+        "be used to send data out of the app, so mention which origins the "
+        "app needs and why before calling this. Requires edit permission for "
+        "that app."
     ),
     "view": (
         "View the current HTML source for a stored Datasette app, with "
@@ -347,28 +358,109 @@ def _stored_query_access_text(app_name, granted, removed=()):
     return "\n".join(lines)
 
 
-async def _ask_stored_query_approval(context, app_name, granted, removed=()):
-    """Ask the user to approve granting an app these stored queries.
+async def _ask_approval(context, prompt, *, html, text, unavailable_message):
+    """Ask the user a yes/no approval question.
 
     Returns True or False. In an interactive conversation this suspends
     the turn (QuestionPending propagates); when questions are unsupported
     it returns an error string for the model instead.
     """
     if context is None:
-        return _error(STORED_QUERY_APPROVAL_UNAVAILABLE)
+        return _error(unavailable_message)
     try:
-        approved = await context.ask_user(
-            _stored_query_access_prompt(app_name, granted),
-            html=_stored_query_access_html(app_name, granted, removed),
-            text=_stored_query_access_text(app_name, granted, removed),
-        )
+        approved = await context.ask_user(prompt, html=html, text=text)
     except Exception as e:
         # Matched by name so datasette-agent stays an optional dependency;
         # QuestionPending (an llm.PauseChain) must keep propagating.
         if e.__class__.__name__ == "QuestionsNotSupported":
-            return _error(STORED_QUERY_APPROVAL_UNAVAILABLE)
+            return _error(unavailable_message)
         raise
     return bool(approved)
+
+
+async def _ask_stored_query_approval(context, app_name, granted, removed=()):
+    """Ask the user to approve granting an app these stored queries."""
+    return await _ask_approval(
+        context,
+        _stored_query_access_prompt(app_name, granted),
+        html=_stored_query_access_html(app_name, granted, removed),
+        text=_stored_query_access_text(app_name, granted, removed),
+        unavailable_message=STORED_QUERY_APPROVAL_UNAVAILABLE,
+    )
+
+
+CSP_ORIGIN_APPROVAL_UNAVAILABLE = (
+    "Allowing an app to contact external origins requires the user's "
+    "approval, which is not available in this context. The user can set "
+    "allowed origins themselves on the app's edit page."
+)
+
+CSP_ORIGIN_ACCESS_NOTE = (
+    "Allowed origins can serve the app's scripts, stylesheets and images "
+    "and receive fetch requests, so the app could send data it can read "
+    "to them."
+)
+
+
+def _csp_origins_prompt(app_name, added):
+    return "Allow {} to contact {} external origin{}?".format(
+        app_name, len(added), "" if len(added) == 1 else "s"
+    )
+
+
+def _csp_origins_html(app_name, added, removed=()):
+    """Trusted HTML shown above the approval question: every origin the app
+    would gain, plus a plain statement of what that lets it do."""
+    parts = [
+        '<div class="datasette-app-csp-origin-approval">',
+        "<p><strong>{}</strong> will be allowed to contact {} external "
+        "origin{}:</p>".format(
+            html.escape(app_name), len(added), "" if len(added) == 1 else "s"
+        ),
+        "<ul>{}</ul>".format(
+            "".join(
+                "<li><code>{}</code></li>".format(html.escape(origin))
+                for origin in added
+            )
+        ),
+        "<p>{}</p>".format(html.escape(CSP_ORIGIN_ACCESS_NOTE)),
+    ]
+    if removed:
+        parts.append(
+            "<p>Access will be removed for: {}</p>".format(
+                ", ".join(
+                    "<code>{}</code>".format(html.escape(origin)) for origin in removed
+                )
+            )
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _csp_origins_text(app_name, added, removed=()):
+    lines = [
+        "{} will be allowed to contact {} external origin{}:".format(
+            app_name, len(added), "" if len(added) == 1 else "s"
+        )
+    ]
+    lines.extend("  " + origin for origin in added)
+    lines.append("")
+    lines.append(CSP_ORIGIN_ACCESS_NOTE)
+    if removed:
+        lines.append("")
+        lines.append("Access will be removed for: " + ", ".join(removed))
+    return "\n".join(lines)
+
+
+async def _ask_csp_origins_approval(context, app_name, added, removed=()):
+    """Ask the user to approve letting an app contact these origins."""
+    return await _ask_approval(
+        context,
+        _csp_origins_prompt(app_name, added),
+        html=_csp_origins_html(app_name, added, removed),
+        text=_csp_origins_text(app_name, added, removed),
+        unavailable_message=CSP_ORIGIN_APPROVAL_UNAVAILABLE,
+    )
 
 
 def _declined(message, app_id=None):
@@ -430,6 +522,19 @@ async def _app_create(
                 "proceed - for example, call app_create again without "
                 "stored_queries."
             )
+    if csp_origins:
+        # An allowed origin is a channel for data to leave the app, so it
+        # is approved the same way, before the app exists.
+        approved = await _ask_csp_origins_approval(context, name, csp_origins)
+        if approved is not True:
+            if isinstance(approved, str):
+                return approved
+            return _declined(
+                "The user declined to let this app contact the requested "
+                "origins, so the app was not created. Ask the user how to "
+                "proceed - for example, call app_create again without "
+                "csp_origins."
+            )
     try:
         app = await Registry(datasette).create_stored_app(
             actor_id=_actor_id(actor),
@@ -449,6 +554,7 @@ async def _app_create(
             "name": app["name"],
             "version": app["current_version"],
             "stored_queries": app["stored_queries"],
+            "csp_origins": csp_origins,
             "status": (
                 "Created app. The user can open it with the rendered View app "
                 "link above."
@@ -590,26 +696,40 @@ async def _with_app_edit_permission(datasette, actor, app_id, callback):
     return await callback()
 
 
-def _csp_origins_schema_description(datasette=None):
-    description = (
-        "Optional exact https:// origins this app may contact "
-        "for scripts, styles, images, and fetch requests"
-    )
+def _csp_origins_rules_description(datasette):
+    """The allow-list or permission rules that apply to setting origins."""
     if datasette is None:
-        return description
+        return ""
     # The schema is built once at registration time, not per-actor, so this
     # describes the rules for users without the apps-set-csp permission.
     allowlist = configured_csp_allowlist(datasette)
     if allowlist:
-        return description + (
+        return (
             ". Origins must come from this allow-list: {} "
             "(the apps-set-csp permission lifts this restriction)".format(
                 ", ".join(allowlist)
             )
         )
-    return description + (
+    return (
         ". Requires the apps-set-csp permission; no origin allow-list is "
         "configured, so users without that permission cannot set origins"
+    )
+
+
+def _csp_origins_schema_description(datasette=None):
+    return (
+        "Optional exact https:// origins this app may contact for scripts, "
+        "styles, images, and fetch requests. The user is asked to approve this "
+        "access before the app is created" + _csp_origins_rules_description(datasette)
+    )
+
+
+def _set_csp_origins_schema_description(datasette=None):
+    return (
+        "The complete list of exact https:// origins this app may contact for "
+        "scripts, styles, images, and fetch requests; an empty list removes all "
+        "network access. The user is asked to approve newly added origins"
+        + _csp_origins_rules_description(datasette)
     )
 
 
@@ -669,18 +789,85 @@ async def _app_set_stored_queries(
             "status": "Updated stored query access; saved as app revision v{}.".format(
                 version["version"]
             ),
-            "_html": _render_app(
-                Editable(
-                    ref=app_id,
-                    content="",
-                    metadata={
-                        "app_id": app_id,
-                        "name": app["name"],
-                        "path": datasette.urls.path(app["path"]),
-                    },
-                    version=version["version"],
-                )
-            )["_html"],
+            "_html": _render_app_update(datasette, app, version["version"]),
+        }
+    )
+
+
+def _render_app_update(datasette, app, version):
+    return _render_app(
+        Editable(
+            ref=app["id"],
+            content="",
+            metadata={
+                "app_id": app["id"],
+                "name": app["name"],
+                "path": datasette.urls.path(app["path"]),
+            },
+            version=version,
+        )
+    )["_html"]
+
+
+async def _app_set_csp_origins(datasette, actor, app_id, csp_origins, context=None):
+    if not await _can_edit_app(datasette, actor, app_id):
+        return _error("Permission denied: edit-app", app_id=app_id)
+    registry = Registry(datasette)
+    app = await registry.get_app(app_id)
+    if app is None or app["external"]:
+        return _error("Stored app not found", app_id=app_id)
+    current = await registry.get_csp_origins(app_id)
+    try:
+        # Like the edit page, origins the app already has may be kept even
+        # when they are outside the configured allow-list.
+        resolved = await resolve_csp_origins(
+            datasette, actor, csp_origins or [], existing_origins=current
+        )
+    except ValueError as e:
+        return _error(str(e), app_id=app_id)
+    resolved = sorted(resolved)
+    added = [origin for origin in resolved if origin not in current]
+    removed = [origin for origin in current if origin not in resolved]
+    if not added and not removed:
+        return json.dumps(
+            {
+                "app_id": app_id,
+                "csp_origins": resolved,
+                "status": "No change: the app already had exactly these origins.",
+            }
+        )
+    if added:
+        # Only new origins need approval - dropping access is not a
+        # data-access decision. ask_user() replays its stored answer when
+        # this call re-executes, so it must come before the update.
+        approved = await _ask_csp_origins_approval(
+            context, app["name"] or app_id, added, removed
+        )
+        if approved is not True:
+            if isinstance(approved, str):
+                return approved
+            return _declined(
+                "The user declined to let this app contact the requested "
+                "origins, so its allowed origins were left unchanged. Ask the "
+                "user how to proceed.",
+                app_id=app_id,
+            )
+    try:
+        await registry.set_csp_origins(app_id, resolved, actor_id=_actor_id(actor))
+    except KeyError:
+        return _error("Stored app not found", app_id=app_id)
+    version = await registry.get_current_version(app_id)
+    return json.dumps(
+        {
+            "app_id": app_id,
+            "version": version["version"],
+            "csp_origins": resolved,
+            "added": added,
+            "removed": removed,
+            "status": "Updated allowed origins; saved as app revision v{}.".format(
+                version["version"]
+            ),
+            "_html": _render_app_update(datasette, app, version["version"]),
         }
     )
 
@@ -1006,6 +1193,26 @@ def get_app_edit_tools(AgentTool, datasette=None):
                 "required": ["app_id", "stored_queries"],
             },
             fn=_app_set_stored_queries,
+        ),
+        AgentTool(
+            name="app_set_csp_origins",
+            description=APP_TOOL_DESCRIPTIONS["set_csp_origins"],
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "app_id": {
+                        "type": "string",
+                        "description": "The stored Datasette app ID",
+                    },
+                    "csp_origins": {
+                        "type": "array",
+                        "description": _set_csp_origins_schema_description(datasette),
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["app_id", "csp_origins"],
+            },
+            fn=_app_set_csp_origins,
         ),
         AgentTool(
             name="app_debug",

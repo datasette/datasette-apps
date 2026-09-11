@@ -17,6 +17,13 @@ class FakeAgentTool:
     required_permission: str | None = None
 
 
+class ApprovingContext:
+    """Answers every ask_user() question with yes."""
+
+    async def ask_user(self, prompt, **kwargs):
+        return True
+
+
 def _tools_by_name():
     return {tool.name: tool for tool in get_app_edit_tools(FakeAgentTool)}
 
@@ -33,6 +40,7 @@ async def test_app_edit_agent_tools_are_registered():
         "app_edit",
         "app_render",
         "app_set_stored_queries",
+        "app_set_csp_origins",
         "app_debug",
     }
     assert tools["app_edit"].input_schema["required"] == ["app_id", "edits"]
@@ -526,6 +534,7 @@ async def test_app_create_agent_tool_allows_allowlisted_csp_origin():
         await tools["app_create"].fn(
             datasette=datasette,
             actor={"id": "alice"},
+            context=ApprovingContext(),
             name="CDN app",
             html="<h1>Hi</h1>",
             csp_origins=["https://cdn.jsdelivr.net"],
@@ -555,6 +564,7 @@ async def test_app_create_agent_tool_allows_any_origin_with_permission():
         await tools["app_create"].fn(
             datasette=datasette,
             actor={"id": "alice"},
+            context=ApprovingContext(),
             name="Privileged app",
             html="<h1>Hi</h1>",
             csp_origins=["https://api.github.com"],
