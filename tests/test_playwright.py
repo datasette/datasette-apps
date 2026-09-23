@@ -1131,3 +1131,44 @@ throw new Error("render exploded");
             or (error.get("sanitized") and "details withheld" in error["message"])
             for error in js_errors
         )
+
+
+def test_debug_harness_reports_debug_script_syntax_error_immediately(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DATASETTE_SECRET", DEBUG_ACTOR_SECRET)
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app('<h1 id="title">Fine app</h1>', name="Fine app")
+    )
+    job, payload, harness = asyncio.run(
+        _create_debug_job_with_task(
+            server,
+            app["id"],
+            "const title = document.querySelector('#title';\n"
+            "return title.textContent;",
+            timeout_ms=30000,
+        )
+    )
+
+    with server, _browser_page() as page:
+        _run_debug_task(server, page, "01TASK0000000000000000SYNX", payload, harness)
+        envelope = _wait_for_task_result(page)[0]["envelope"]
+
+        # A debug script that fails to compile never runs its wrapper, so
+        # it used to wait out the whole timeout with only an app-level
+        # javascript-error event - just "Script error." on WebKit. It is
+        # now the run's own error, reported straight away.
+        assert envelope["timed_out"] is False
+        assert envelope["duration_ms"] < 10000
+        assert envelope["ok"] is False
+        error = envelope["error"]
+        assert error["message"].startswith("Debug script failed to compile")
+        # Chromium and Firefox report the parser's message and position;
+        # WebKit withholds them in sandboxed frames, so the message
+        # explains that instead
+        if not error.get("sanitized"):
+            assert error["name"] == "SyntaxError"
+            assert "Failed to execute" not in error["message"]
+            assert error["line"] == 1
+        assert envelope["events"]["errors"] == []

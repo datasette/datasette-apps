@@ -74,6 +74,38 @@ _DEBUG_BRIDGE_EXTENSIONS = """
     return true;
   }
 
+  function debugScriptCompileError(details, code) {
+    if (!details) {
+      return {message: "Debug script did not run"};
+    }
+    if (details.sanitized) {
+      return {
+        sanitized: true,
+        message: "Debug script failed to compile, most likely a syntax " +
+          "error - this browser withholds the details in sandboxed " +
+          "frames. Check for unbalanced brackets or quotes, and for " +
+          "import or export statements, which an async function body " +
+          "cannot contain"
+      };
+    }
+    var error = {
+      name: details.name || "SyntaxError",
+      // Chromium prefixes the message with the DOM call that inserted
+      // the script
+      message: "Debug script failed to compile: " +
+        String(details.message || "").replace(
+          /^Failed to execute '[^']*' on '[^']*': /, ""
+        )
+    };
+    // The debug script starts on line 2 of the injected wrapper
+    var line = details.lineno - 1;
+    if (line >= 1 && line <= code.split("\\n").length) {
+      error.line = line;
+      error.column = details.colno;
+    }
+    return error;
+  }
+
   function runDebugScript(id, code) {
     function report(ok, payload) {
       var message = {type: "datasette-app-debug-result", id: id, ok: ok};
@@ -116,15 +148,39 @@ _DEBUG_BRIDGE_EXTENSIONS = """
       delete window.__datasetteAppsDebugReportError;
       report(false, normalizeError(error));
     };
+    var started = false;
+    var compileError = null;
+    window.__datasetteAppsDebugStarted = function() {
+      started = true;
+    };
     var script = document.createElement("script");
     script.textContent = "(async function() {" +
+      "window.__datasetteAppsDebugStarted(); " +
       "try { window.__datasetteAppsDebugReport(" +
       "await (async function() {\\n" + code + "\\n})()); }" +
       " catch (error) { window.__datasetteAppsDebugReportError(error); }" +
       "})();";
-    (document.body || document.documentElement).appendChild(script);
+    // Inline scripts run synchronously on insertion and the async
+    // wrapper cannot throw, so an error event raised meanwhile means the
+    // script failed to compile: it becomes the run's result, not an app
+    // error - otherwise the run would wait out its whole timeout.
+    debugErrorHandler = function(details) {
+      compileError = details;
+      return true;
+    };
+    try {
+      (document.body || document.documentElement).appendChild(script);
+    } finally {
+      debugErrorHandler = null;
+    }
     if (script.parentNode) {
       script.parentNode.removeChild(script);
+    }
+    delete window.__datasetteAppsDebugStarted;
+    if (!started) {
+      delete window.__datasetteAppsDebugReport;
+      delete window.__datasetteAppsDebugReportError;
+      report(false, debugScriptCompileError(compileError, code));
     }
   }
 
@@ -150,6 +206,7 @@ def iframe_bridge_script(channel_token=None, debug=False):
   var lastViewportContent = null;
   var viewportReporterStarted = false;
   var debugMessageHandler = null;
+  var debugErrorHandler = null;
 
   function noopHistoryMethod() {
   }
@@ -380,6 +437,9 @@ def iframe_bridge_script(channel_token=None, debug=False):
     details.filename = event.filename || "";
     details.lineno = event.lineno || 0;
     details.colno = event.colno || 0;
+    if (debugErrorHandler && debugErrorHandler(details)) {
+      return;
+    }
     postAppError("javascript-error", details);
   }, true);
 
