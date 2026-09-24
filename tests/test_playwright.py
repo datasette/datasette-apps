@@ -1230,6 +1230,8 @@ return {count: shared.count};
         for error in envelope["events"]["errors"]
         if error["kind"] == "javascript-error"
     }
+    # A str, so pytest reports it in full rather than truncated
+    all_errors = json.dumps(list(js_errors.values()), indent=1)
     # WebKit sanitizes every one of these to "Script error." in a
     # sandboxed frame; debug frames recover each message
     for expected in (
@@ -1238,8 +1240,8 @@ return {count: shared.count};
         "inline attribute handler failed",
         "timer callback failed",
     ):
-        assert any(expected in message for message in js_errors), js_errors
-    assert not any("Script error" in message for message in js_errors), js_errors
+        assert any(expected in message for message in js_errors), all_errors
+    assert not any("Script error" in message for message in js_errors), all_errors
     top_level = next(
         error
         for message, error in js_errors.items()

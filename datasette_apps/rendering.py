@@ -220,9 +220,7 @@ _DEBUG_BRIDGE_EXTENSIONS = """
   // Errors from converted scripts are reported against "app-script-N"
   // (the Nth <script> element in the app) with line numbers within
   // that script, plus the text of the failing line.
-  var nativeQueueMicrotask = typeof window.queueMicrotask === "function"
-    ? window.queueMicrotask.bind(window)
-    : function(fn) { Promise.resolve().then(fn); };
+  var nativeSetTimeout = window.setTimeout.bind(window);
   var nativeAddEventListener = EventTarget.prototype.addEventListener;
   var nativeRemoveEventListener = EventTarget.prototype.removeEventListener;
   var NativeMutationObserver = window.MutationObserver;
@@ -249,7 +247,7 @@ _DEBUG_BRIDGE_EXTENSIONS = """
   var seenScripts = new WeakSet();
   var callbackWrappers = new WeakMap();  // callback -> wrapper
   var wrappedCallbacks = new WeakMap();  // wrapper -> callback
-  var thrownByCallback = null;
+  var thrownByCallbacks = [];
 
   function errorsAreSanitized() {
     var sanitized = false;
@@ -363,13 +361,14 @@ _DEBUG_BRIDGE_EXTENSIONS = """
   }
 
   function rememberThrown(error) {
-    thrownByCallback = {error: error};
-    // The error event for an uncaught callback exception is dispatched
-    // before any microtask runs; anything still here afterwards was
-    // caught elsewhere
-    nativeQueueMicrotask(function() {
-      thrownByCallback = null;
-    });
+    // The browser reports an uncaught callback exception within the
+    // same task - though WebKit drains microtasks first, and a callback
+    // throwing in one of those is reported before this one, hence a
+    // stack. Anything left by a later task was caught elsewhere.
+    thrownByCallbacks.push({error: error});
+    nativeSetTimeout(function() {
+      thrownByCallbacks = [];
+    }, 0);
   }
 
   function wrapCallback(callback) {
@@ -511,8 +510,7 @@ _DEBUG_BRIDGE_EXTENSIONS = """
   }
 
   function recoverErrorDetails(details) {
-    var thrown = thrownByCallback;
-    thrownByCallback = null;
+    var thrown = thrownByCallbacks.pop();
     if (!details.sanitized) {
       return false;
     }
