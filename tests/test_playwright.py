@@ -1172,3 +1172,89 @@ def test_debug_harness_reports_debug_script_syntax_error_immediately(
             assert "Failed to execute" not in error["message"]
             assert error["line"] == 1
         assert envelope["events"]["errors"] == []
+
+
+# TEMPORARY PROBE - records what each engine reports to a sandboxed
+# srcdoc frame's error listener for several ways of raising an error.
+# Emitted as a warning so CI logs carry the data; removed after.
+_PROBES = {
+    "classic_toplevel": '<script id="s">throw new Error("classic top-level")</script>',
+    "classic_sourceurl_data": '<script id="s">throw new Error("sourceURL data")\n//# sourceURL=data:text/javascript,probe</script>',
+    "classic_sourceurl_relative": '<script id="s">throw new Error("sourceURL relative")\n//# sourceURL=probe-script.js</script>',
+    "module_toplevel": '<script type="module" id="s">throw new Error("module top-level")</script>',
+    "classic_timeout": '<script id="s">setTimeout(function() { throw new Error("classic timeout") }, 0)</script>',
+    "module_timeout": '<script type="module" id="s">setTimeout(function() { throw new Error("module timeout") }, 0)</script>',
+    "classic_rethrown_by_module": (
+        '<script type="module">window.wrapM = function(fn) { return function() {'
+        " try { return fn.apply(this, arguments); } catch (e) { throw e; } }; };</script>"
+        '<script id="s">setTimeout(function() { window.wrapM(function() {'
+        ' throw new Error("rethrown via module"); })(); }, 100)</script>'
+    ),
+    "classic_rethrown_by_classic": (
+        '<script id="s">setTimeout(function() { try { throw new Error("orig") }'
+        ' catch (e) { throw new Error("rethrown classic") } }, 0)</script>'
+    ),
+    "classic_listener_dispatch": (
+        '<script id="s">document.addEventListener("probe", function() {'
+        ' throw new Error("listener"); }); document.dispatchEvent(new Event("probe"));</script>'
+    ),
+    "classic_syntax": '<script id="s">var x = (;</script>',
+}
+
+_PROBE_LISTENER = """<script id="listener">
+window.addEventListener("error", function(e) {
+  var cs = document.currentScript;
+  parent.postMessage({
+    probe: __NAME__,
+    message: String(e.message),
+    filename: e.filename || "",
+    lineno: e.lineno || 0,
+    colno: e.colno || 0,
+    hasError: !!e.error,
+    errorMessage: e.error ? String(e.error.message) : null,
+    stack: e.error && e.error.stack ? String(e.error.stack).slice(0, 160) : null,
+    currentScript: cs ? (cs.id || "(no id)") : null
+  }, "*");
+}, true);
+</script>"""
+
+
+def test_zz_probe_error_sanitization(tmp_path):
+    import warnings
+
+    from datasette_apps.csp import build_csp
+    from datasette_apps.rendering import _csp_meta
+
+    server = DatasetteServer(tmp_path)
+    docs = {
+        name: "<!doctype html>"
+        + _csp_meta(build_csp([]))
+        + _PROBE_LISTENER.replace("__NAME__", json.dumps(name))
+        + html
+        for name, html in _PROBES.items()
+    }
+    with server, _browser_page() as page:
+        page.goto(server.url + "/")
+        results = page.evaluate(
+            """async (docs) => {
+              const results = {};
+              window.addEventListener("message", (e) => {
+                if (e.data && e.data.probe) {
+                  (results[e.data.probe] = results[e.data.probe] || []).push(e.data);
+                }
+              });
+              for (const [name, doc] of Object.entries(docs)) {
+                const iframe = document.createElement("iframe");
+                iframe.setAttribute("sandbox", "allow-scripts allow-forms");
+                iframe.srcdoc = doc;
+                document.body.appendChild(iframe);
+              }
+              await new Promise((r) => setTimeout(r, 2000));
+              return results;
+            }""",
+            docs,
+        )
+    browser = os.environ.get("DATASETTE_APPS_PLAYWRIGHT_BROWSER", "chromium")
+    warnings.warn(
+        "PROBE-RESULTS " + browser + " " + json.dumps(results, sort_keys=True)
+    )
