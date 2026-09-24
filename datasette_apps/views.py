@@ -733,7 +733,7 @@ async def debug_frame(datasette, request):
     version = await registry.get_version(job["app_id"], job["version"])
     if version is None:
         raise NotFound("App revision not found")
-    csp = build_csp(await registry.get_csp_origins(job["app_id"]))
+    csp = build_csp(await registry.get_csp_origins(job["app_id"]), debug=True)
     document = build_app_srcdoc(
         version["html"],
         csp,

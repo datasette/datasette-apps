@@ -39,6 +39,23 @@ def test_build_csp_includes_exact_connect_origins():
     )
 
 
+def test_build_debug_csp_adds_blob_scripts_and_blocks_workers():
+    # The debug bridge re-runs inline scripts as blob: scripts on
+    # engines that withhold their error details; workers stay blocked
+    assert build_csp([], debug=True) == (
+        "default-src 'none'; script-src 'unsafe-inline' blob:; "
+        "style-src 'unsafe-inline'; img-src data: blob:; worker-src 'none';"
+    )
+    assert build_csp(["https://api.github.com"], debug=True) == (
+        "default-src 'none'; script-src 'unsafe-inline' blob:; "
+        "style-src 'unsafe-inline'; "
+        "script-src-elem 'unsafe-inline' https://api.github.com blob:; "
+        "style-src-elem 'unsafe-inline' https://api.github.com; "
+        "img-src data: blob: https://api.github.com; "
+        "connect-src https://api.github.com; worker-src 'none';"
+    )
+
+
 def test_build_csp_can_allow_insecure_origins_in_tests(monkeypatch):
     monkeypatch.setenv("DATASETTE_APPS_ALLOW_INSECURE_TEST_CSP_ORIGINS", "1")
 

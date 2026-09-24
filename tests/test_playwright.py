@@ -1118,16 +1118,137 @@ throw new Error("render exploded");
         )
         assert "app warned" in messages
         # WebKit withholds uncaught-error details in sandboxed (opaque
-        # origin) frames - srcdoc and URL frames alike - reporting only
-        # "Script error."; the bridge annotates those so readers know why
-        # details are missing. Chromium and Firefox report in full.
+        # origin) frames, reporting only "Script error."; debug frames
+        # recover them, so every engine reports the thrown message.
         js_errors = [
             error
             for error in envelope["events"]["errors"]
             if error["kind"] == "javascript-error"
         ]
-        assert any(
-            "render exploded" in error.get("message", "")
-            or (error.get("sanitized") and "details withheld" in error["message"])
-            for error in js_errors
+        assert any("render exploded" in error.get("message", "") for error in js_errors)
+
+
+def test_debug_harness_reports_debug_script_syntax_error_immediately(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DATASETTE_SECRET", DEBUG_ACTOR_SECRET)
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app('<h1 id="title">Fine app</h1>', name="Fine app")
+    )
+    job, payload, harness = asyncio.run(
+        _create_debug_job_with_task(
+            server,
+            app["id"],
+            "const title = document.querySelector('#title';\n"
+            "return title.textContent;",
+            timeout_ms=30000,
         )
+    )
+
+    with server, _browser_page() as page:
+        _run_debug_task(server, page, "01TASK0000000000000000SYNX", payload, harness)
+        envelope = _wait_for_task_result(page)[0]["envelope"]
+
+        # A debug script that fails to compile never runs its wrapper, so
+        # it used to wait out the whole timeout with only an app-level
+        # javascript-error event - just "Script error." on WebKit. It is
+        # now the run's own error, reported straight away.
+        assert envelope["timed_out"] is False
+        assert envelope["duration_ms"] < 10000
+        assert envelope["ok"] is False
+        error = envelope["error"]
+        assert error["message"].startswith("Debug script failed to compile")
+        # Chromium and Firefox report the parser's message and position;
+        # WebKit withholds them in sandboxed frames, so the message
+        # explains that instead
+        if not error.get("sanitized"):
+            assert error["name"] == "SyntaxError"
+            assert "Failed to execute" not in error["message"]
+            assert error["line"] == 1
+        assert envelope["events"]["errors"] == []
+
+
+def test_debug_harness_recovers_error_details_from_every_error_source(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DATASETTE_SECRET", DEBUG_ACTOR_SECRET)
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<h1 id="title">Error sampler</h1>
+<button id="listener-button">Listener</button>
+<button id="attribute-button" onclick="attributeHandler()">Attribute</button>
+<script>
+const shared = {count: 0};
+function attributeHandler() {
+  shared.count += 1;
+  throw new Error("inline attribute handler failed");
+}
+document.getElementById("listener-button").addEventListener("click", function() {
+  shared.count += 1;
+  throw new Error("click listener failed");
+});
+setTimeout(function() {
+  throw new Error("timer callback failed");
+}, 0);
+</script>
+<script>
+shared.count += 1;
+document.getElementById("title").dataset.ready = "yes";
+throw new Error("top-level code failed");
+</script>""",
+            name="Error sampler",
+        )
+    )
+    job, payload, harness = asyncio.run(
+        _create_debug_job_with_task(
+            server,
+            app["id"],
+            """
+await debug.waitFor(() => document.getElementById("title").dataset.ready);
+document.getElementById("listener-button").click();
+document.getElementById("attribute-button").click();
+await new Promise((resolve) => setTimeout(resolve, 200));
+return {count: shared.count};
+""",
+        )
+    )
+
+    with server, _browser_page() as page:
+        _run_debug_task(server, page, "01TASK0000000000000000RCVR", payload, harness)
+        envelope = _wait_for_task_result(page)[0]["envelope"]
+
+    # The app ran exactly as it would without the debug bridge: its
+    # scripts share top-level bindings with each other and with the
+    # debug script
+    assert envelope["ok"] is True, envelope
+    assert envelope["result"] == {"count": 3}
+    js_errors = {
+        error["message"]: error
+        for error in envelope["events"]["errors"]
+        if error["kind"] == "javascript-error"
+    }
+    # A str, so pytest reports it in full rather than truncated
+    all_errors = json.dumps(list(js_errors.values()), indent=1)
+    # WebKit sanitizes every one of these to "Script error." in a
+    # sandboxed frame; debug frames recover each message
+    for expected in (
+        "top-level code failed",
+        "click listener failed",
+        "inline attribute handler failed",
+        "timer callback failed",
+    ):
+        assert any(expected in message for message in js_errors), all_errors
+    assert not any("Script error" in message for message in js_errors), all_errors
+    top_level = next(
+        error
+        for message, error in js_errors.items()
+        if "top-level code failed" in message
+    )
+    if top_level["filename"].startswith("app-script-"):
+        # Engines that sanitize run inline scripts as blob: scripts,
+        # reported against the app's Nth <script> element
+        assert top_level["filename"] == "app-script-2"
+        assert top_level["sourceLine"] == 'throw new Error("top-level code failed");'
