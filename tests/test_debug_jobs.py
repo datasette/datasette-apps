@@ -149,7 +149,13 @@ async def test_frame_serves_job_revision_with_debug_bridge():
     assert "datasette-app-debug-eval" in document
     assert "waitFor" in document
     assert job["config"]["channel_token"] in document
-    assert response.headers["cache-control"] == "no-store"
+    # Newer Datasette releases add "private" to responses for signed-in
+    # actors, so check for the directive rather than the exact header
+    cache_control = [
+        directive.strip()
+        for directive in response.headers["cache-control"].lower().split(",")
+    ]
+    assert "no-store" in cache_control
 
     # Only the actor who created the job may fetch the document; the
     # frame token additionally binds the request to the claimed run.
