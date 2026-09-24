@@ -1174,65 +1174,94 @@ def test_debug_harness_reports_debug_script_syntax_error_immediately(
         assert envelope["events"]["errors"] == []
 
 
-# TEMPORARY PROBE - records what each engine reports to a sandboxed
-# srcdoc frame's error listener for several ways of raising an error.
-# Emitted as a warning so CI logs carry the data; removed after.
-_PROBES = {
-    "classic_toplevel": '<script id="s">throw new Error("classic top-level")</script>',
-    "classic_sourceurl_data": '<script id="s">throw new Error("sourceURL data")\n//# sourceURL=data:text/javascript,probe</script>',
-    "classic_sourceurl_relative": '<script id="s">throw new Error("sourceURL relative")\n//# sourceURL=probe-script.js</script>',
-    "module_toplevel": '<script type="module" id="s">throw new Error("module top-level")</script>',
-    "classic_timeout": '<script id="s">setTimeout(function() { throw new Error("classic timeout") }, 0)</script>',
-    "module_timeout": '<script type="module" id="s">setTimeout(function() { throw new Error("module timeout") }, 0)</script>',
-    "classic_rethrown_by_module": (
-        '<script type="module">window.wrapM = function(fn) { return function() {'
-        " try { return fn.apply(this, arguments); } catch (e) { throw e; } }; };</script>"
-        '<script id="s">setTimeout(function() { window.wrapM(function() {'
-        ' throw new Error("rethrown via module"); })(); }, 100)</script>'
-    ),
-    "classic_rethrown_by_classic": (
-        '<script id="s">setTimeout(function() { try { throw new Error("orig") }'
-        ' catch (e) { throw new Error("rethrown classic") } }, 0)</script>'
-    ),
-    "classic_listener_dispatch": (
-        '<script id="s">document.addEventListener("probe", function() {'
-        ' throw new Error("listener"); }); document.dispatchEvent(new Event("probe"));</script>'
-    ),
-    "classic_syntax": '<script id="s">var x = (;</script>',
-}
+# TEMPORARY PROBE (round 2) - can a MutationObserver convert inline
+# classic scripts to same-text blob:/data: scripts before they run, and
+# does WebKit then report their errors in full? Also checks a
+# Sentry-style callback wrapper. Emitted as a warning; removed after.
+_PROBE2_CONVERTER = """<script id="converter">
+new MutationObserver(function(records) {
+  records.forEach(function(r) { r.addedNodes.forEach(function(node) {
+    if (node.tagName !== "SCRIPT" || node.src || !node.hasAttribute("data-convert")) return;
+    node.dataset.seen = "1";
+    var text = node.textContent;
+    if (__MODE__ === "none") return;
+    if (__CROSSORIGIN__) node.crossOrigin = "anonymous";
+    node.src = __MODE__ === "blob"
+      ? URL.createObjectURL(new Blob([text], {type: "text/javascript"}))
+      : "data:text/javascript;charset=utf-8," + encodeURIComponent(text);
+  }); });
+}).observe(document, {childList: true, subtree: true});
+</script>"""
 
-_PROBE_LISTENER = """<script id="listener">
+_PROBE2_BODY = """<script id="a" data-convert>let shared = 42; var viaVar = 1;
+parent.postMessage({probe: __NAME__, step: "a-ran",
+  seen: (document.currentScript && document.currentScript.dataset.seen) || null,
+  src: document.currentScript ? document.currentScript.src.slice(0, 12) : null}, "*");</script>
+<script id="b">parent.postMessage({probe: __NAME__, step: "b-ran",
+  sharedType: typeof shared, viaVar: typeof viaVar}, "*");</script>
+<script id="c" data-convert>
+throw new Error("converted top-level");</script>
+<script id="d">parent.postMessage({probe: __NAME__, step: "d-ran"}, "*");</script>"""
+
+_PROBE2_WRAPPER = """<script id="wrap">
+window.__recorded = null;
+var nativeSetTimeout = window.setTimeout;
+window.setTimeout = function(fn, ms) {
+  var wrapped = function() {
+    try { return fn.apply(this, arguments); }
+    catch (e) { window.__recorded = String(e && e.message); throw e; }
+  };
+  return nativeSetTimeout(wrapped, ms);
+};
+</script>
+<script id="s">setTimeout(function() { null.boom; }, 0)</script>"""
+
+_PROBE2_LISTENER = """<script id="listener">
 window.addEventListener("error", function(e) {
   var cs = document.currentScript;
   parent.postMessage({
-    probe: __NAME__,
-    message: String(e.message),
-    filename: e.filename || "",
-    lineno: e.lineno || 0,
-    colno: e.colno || 0,
-    hasError: !!e.error,
-    errorMessage: e.error ? String(e.error.message) : null,
-    stack: e.error && e.error.stack ? String(e.error.stack).slice(0, 160) : null,
+    probe: __NAME__, step: "error",
+    message: String(e.message), filename: String(e.filename || "").slice(0, 40),
+    lineno: e.lineno || 0, colno: e.colno || 0, hasError: !!e.error,
+    recorded: window.__recorded || null,
     currentScript: cs ? (cs.id || "(no id)") : null
   }, "*");
 }, true);
 </script>"""
 
 
+def _probe2_doc(name, script_src_extra, body):
+    csp = (
+        "default-src 'none'; script-src 'unsafe-inline'"
+        + script_src_extra
+        + "; style-src 'unsafe-inline'; img-src data: blob:;"
+    )
+    return (
+        "<!doctype html>"
+        + '<meta http-equiv="Content-Security-Policy" content="' + csp + '">'
+        + _PROBE2_LISTENER.replace("__NAME__", json.dumps(name))
+        + body.replace("__NAME__", json.dumps(name))
+    )
+
+
 def test_zz_probe_error_sanitization(tmp_path):
     import warnings
 
-    from datasette_apps.csp import build_csp
-    from datasette_apps.rendering import _csp_meta
+    def converter(mode, crossorigin=False):
+        return _PROBE2_CONVERTER.replace("__MODE__", json.dumps(mode)).replace(
+            "__CROSSORIGIN__", json.dumps(crossorigin)
+        )
 
-    server = DatasetteServer(tmp_path)
     docs = {
-        name: "<!doctype html>"
-        + _csp_meta(build_csp([]))
-        + _PROBE_LISTENER.replace("__NAME__", json.dumps(name))
-        + html
-        for name, html in _PROBES.items()
+        "observer_only": _probe2_doc("observer_only", "", converter("none") + _PROBE2_BODY),
+        "blob": _probe2_doc("blob", " blob:", converter("blob") + _PROBE2_BODY),
+        "blob_crossorigin": _probe2_doc(
+            "blob_crossorigin", " blob:", converter("blob", True) + _PROBE2_BODY
+        ),
+        "data": _probe2_doc("data", " data:", converter("data") + _PROBE2_BODY),
+        "wrapper": _probe2_doc("wrapper", "", _PROBE2_WRAPPER),
     }
+    server = DatasetteServer(tmp_path)
     with server, _browser_page() as page:
         page.goto(server.url + "/")
         results = page.evaluate(
@@ -1255,6 +1284,4 @@ def test_zz_probe_error_sanitization(tmp_path):
             docs,
         )
     browser = os.environ.get("DATASETTE_APPS_PLAYWRIGHT_BROWSER", "chromium")
-    warnings.warn(
-        "PROBE-RESULTS " + browser + " " + json.dumps(results, sort_keys=True)
-    )
+    warnings.warn("PROBE-RESULTS " + browser + " " + json.dumps(results, sort_keys=True))
