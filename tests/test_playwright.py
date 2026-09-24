@@ -1118,19 +1118,14 @@ throw new Error("render exploded");
         )
         assert "app warned" in messages
         # WebKit withholds uncaught-error details in sandboxed (opaque
-        # origin) frames - srcdoc and URL frames alike - reporting only
-        # "Script error."; the bridge annotates those so readers know why
-        # details are missing. Chromium and Firefox report in full.
+        # origin) frames, reporting only "Script error."; debug frames
+        # recover them, so every engine reports the thrown message.
         js_errors = [
             error
             for error in envelope["events"]["errors"]
             if error["kind"] == "javascript-error"
         ]
-        assert any(
-            "render exploded" in error.get("message", "")
-            or (error.get("sanitized") and "details withheld" in error["message"])
-            for error in js_errors
-        )
+        assert any("render exploded" in error.get("message", "") for error in js_errors)
 
 
 def test_debug_harness_reports_debug_script_syntax_error_immediately(
@@ -1172,3 +1167,86 @@ def test_debug_harness_reports_debug_script_syntax_error_immediately(
             assert "Failed to execute" not in error["message"]
             assert error["line"] == 1
         assert envelope["events"]["errors"] == []
+
+
+def test_debug_harness_recovers_error_details_from_every_error_source(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DATASETTE_SECRET", DEBUG_ACTOR_SECRET)
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(
+        server.create_app(
+            """<!doctype html>
+<h1 id="title">Error sampler</h1>
+<button id="listener-button">Listener</button>
+<button id="attribute-button" onclick="attributeHandler()">Attribute</button>
+<script>
+const shared = {count: 0};
+function attributeHandler() {
+  shared.count += 1;
+  throw new Error("inline attribute handler failed");
+}
+document.getElementById("listener-button").addEventListener("click", function() {
+  shared.count += 1;
+  throw new Error("click listener failed");
+});
+setTimeout(function() {
+  throw new Error("timer callback failed");
+}, 0);
+</script>
+<script>
+shared.count += 1;
+document.getElementById("title").dataset.ready = "yes";
+throw new Error("top-level code failed");
+</script>""",
+            name="Error sampler",
+        )
+    )
+    job, payload, harness = asyncio.run(
+        _create_debug_job_with_task(
+            server,
+            app["id"],
+            """
+await debug.waitFor(() => document.getElementById("title").dataset.ready);
+document.getElementById("listener-button").click();
+document.getElementById("attribute-button").click();
+await new Promise((resolve) => setTimeout(resolve, 200));
+return {count: shared.count};
+""",
+        )
+    )
+
+    with server, _browser_page() as page:
+        _run_debug_task(server, page, "01TASK0000000000000000RCVR", payload, harness)
+        envelope = _wait_for_task_result(page)[0]["envelope"]
+
+    # The app ran exactly as it would without the debug bridge: its
+    # scripts share top-level bindings with each other and with the
+    # debug script
+    assert envelope["ok"] is True, envelope
+    assert envelope["result"] == {"count": 3}
+    js_errors = {
+        error["message"]: error
+        for error in envelope["events"]["errors"]
+        if error["kind"] == "javascript-error"
+    }
+    # WebKit sanitizes every one of these to "Script error." in a
+    # sandboxed frame; debug frames recover each message
+    for expected in (
+        "top-level code failed",
+        "click listener failed",
+        "inline attribute handler failed",
+        "timer callback failed",
+    ):
+        assert any(expected in message for message in js_errors), js_errors
+    assert not any("Script error" in message for message in js_errors), js_errors
+    top_level = next(
+        error
+        for message, error in js_errors.items()
+        if "top-level code failed" in message
+    )
+    if top_level["filename"].startswith("app-script-"):
+        # Engines that sanitize run inline scripts as blob: scripts,
+        # reported against the app's Nth <script> element
+        assert top_level["filename"] == "app-script-2"
+        assert top_level["sourceLine"] == 'throw new Error("top-level code failed");'

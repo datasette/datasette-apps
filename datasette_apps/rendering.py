@@ -15,7 +15,9 @@ def _csp_meta(csp):
 # Only injected into debug frames: ordinary app views have no eval
 # surface. Execution inserts an inline <script> element, which the
 # production script-src 'unsafe-inline' policy already permits - no
-# 'unsafe-eval', no debug-only CSP variant.
+# 'unsafe-eval'. The debug frame's policy differs from production only
+# by also allowing blob: scripts, used to recover error details on
+# engines that withhold them (see build_csp).
 _DEBUG_BRIDGE_EXTENSIONS = """
   window.debug = {
     waitFor: function(fn, options) {
@@ -164,6 +166,7 @@ _DEBUG_BRIDGE_EXTENSIONS = """
     // wrapper cannot throw, so an error event raised meanwhile means the
     // script failed to compile: it becomes the run's result, not an app
     // error - otherwise the run would wait out its whole timeout.
+    var previousErrorHandler = debugErrorHandler;
     debugErrorHandler = function(details) {
       compileError = details;
       return true;
@@ -171,7 +174,7 @@ _DEBUG_BRIDGE_EXTENSIONS = """
     try {
       (document.body || document.documentElement).appendChild(script);
     } finally {
-      debugErrorHandler = null;
+      debugErrorHandler = previousErrorHandler;
     }
     if (script.parentNode) {
       script.parentNode.removeChild(script);
@@ -188,9 +191,382 @@ _DEBUG_BRIDGE_EXTENSIONS = """
     if (message.type !== "datasette-app-debug-eval") {
       return false;
     }
-    runDebugScript(message.id, String(message.code || ""));
+    var run = function() {
+      runDebugScript(message.id, String(message.code || ""));
+    };
+    if (document.readyState === "loading") {
+      // Run after the page's own parser-inserted scripts: the eval
+      // message can otherwise arrive between them, for instance while
+      // the parser waits on a script converted to blob: (below)
+      nativeAddEventListener.call(document, "DOMContentLoaded", run, {once: true});
+    } else {
+      run();
+    }
     return true;
   };
+
+  // ---- Error details on engines that withhold them ----
+  //
+  // WebKit reports every uncaught error from a classic script in a
+  // sandboxed (opaque origin) frame as a bare "Script error.". On
+  // engines that do, debug frames recover the details:
+  // - each inline <script> is swapped, just before it runs, for a
+  //   same-text blob: script, whose errors keep their details. Still a
+  //   classic script executed in document order, so globals,
+  //   document.write and document.currentScript are unchanged
+  // - callbacks the app registers (timers, listeners, handler
+  //   properties, observers) are wrapped, so whatever they throw is
+  //   captured on its way out, before the browser sanitizes it
+  // Errors from converted scripts are reported against "app-script-N"
+  // (the Nth <script> element in the app) with line numbers within
+  // that script, plus the text of the failing line.
+  var nativeQueueMicrotask = typeof window.queueMicrotask === "function"
+    ? window.queueMicrotask.bind(window)
+    : function(fn) { Promise.resolve().then(fn); };
+  var nativeAddEventListener = EventTarget.prototype.addEventListener;
+  var nativeRemoveEventListener = EventTarget.prototype.removeEventListener;
+  var NativeMutationObserver = window.MutationObserver;
+  var CLASSIC_SCRIPT_TYPES = [
+    "", "text/javascript", "application/javascript", "text/ecmascript",
+    "application/ecmascript", "application/x-javascript", "text/x-javascript"
+  ];
+  // Attributes an external script honors that an inline one ignores
+  var INLINE_ONLY_BLOCKERS = [
+    "src", "async", "defer", "nomodule", "integrity", "onload", "onerror",
+    "language"
+  ];
+  // Event types whose inline on* attribute handlers get wrapped just
+  // before dispatch reaches them
+  var INLINE_HANDLER_EVENTS = [
+    "click", "dblclick", "contextmenu", "auxclick", "mousedown", "mouseup",
+    "mouseover", "mouseout", "pointerdown", "pointerup", "touchstart",
+    "touchend", "keydown", "keyup", "keypress", "input", "change", "submit",
+    "reset", "focus", "blur", "focusin", "focusout", "select", "toggle",
+    "load", "resize", "hashchange"
+  ];
+  var convertedScripts = {};  // blob URL -> {label, text}
+  var pendingConversions = [];
+  var seenScripts = new WeakSet();
+  var callbackWrappers = new WeakMap();  // callback -> wrapper
+  var wrappedCallbacks = new WeakMap();  // wrapper -> callback
+  var thrownByCallback = null;
+
+  function errorsAreSanitized() {
+    var sanitized = false;
+    var probe = document.createElement("script");
+    probe.textContent = "throw new Error('datasette-apps error details probe')";
+    debugErrorHandler = function(details) {
+      sanitized = !!details.sanitized;
+      return true;
+    };
+    try {
+      (document.head || document.documentElement).appendChild(probe);
+    } finally {
+      debugErrorHandler = null;
+    }
+    if (probe.parentNode) {
+      probe.parentNode.removeChild(probe);
+    }
+    return sanitized;
+  }
+
+  function scriptLabel(script) {
+    var scripts = document.getElementsByTagName("script");
+    var index = 0;
+    for (var i = 0; i < scripts.length; i += 1) {
+      if (scripts[i].id === "datasette-apps-bridge") {
+        continue;
+      }
+      index += 1;
+      if (scripts[i] === script) {
+        return "app-script-" + index;
+      }
+    }
+    return "app-script";
+  }
+
+  function canConvert(script) {
+    if (!script.isConnected || document.readyState !== "loading") {
+      return false;
+    }
+    var type = (script.getAttribute("type") || "").trim().toLowerCase();
+    if (CLASSIC_SCRIPT_TYPES.indexOf(type) === -1) {
+      return false;
+    }
+    return !INLINE_ONLY_BLOCKERS.some(function(name) {
+      return script.hasAttribute(name);
+    });
+  }
+
+  function pointScriptAtBlob(entry) {
+    entry.url = URL.createObjectURL(
+      new Blob([entry.text], {type: "text/javascript"})
+    );
+    convertedScripts[entry.url] = entry;
+    entry.script.src = entry.url;
+  }
+
+  function convertScript(script) {
+    var entry = {
+      script: script,
+      text: script.textContent,
+      label: scriptLabel(script),
+      url: null
+    };
+    pointScriptAtBlob(entry);
+    pendingConversions.push(entry);
+    function settle(event) {
+      nativeRemoveEventListener.call(script, "load", settle);
+      nativeRemoveEventListener.call(script, "error", settle);
+      pendingConversions.splice(pendingConversions.indexOf(entry), 1);
+      URL.revokeObjectURL(entry.url);
+      if (event.type === "error" && script.parentNode) {
+        // The blob: script could not load - say the app's own CSP
+        // forbids blob: scripts. Parser-blocking scripts fire this
+        // before parsing resumes, so running the original inline here
+        // keeps it in order.
+        var fallback = document.createElement("script");
+        seenScripts.add(fallback);
+        fallback.textContent = entry.text;
+        script.parentNode.insertBefore(fallback, script.nextSibling);
+      }
+    }
+    nativeAddEventListener.call(script, "load", settle);
+    nativeAddEventListener.call(script, "error", settle);
+  }
+
+  function convertParserScripts(records, observer) {
+    records.forEach(function(record) {
+      Array.prototype.forEach.call(record.addedNodes, function(node) {
+        if (node.nodeType !== 1 || node.tagName !== "SCRIPT" || seenScripts.has(node)) {
+          return;
+        }
+        seenScripts.add(node);
+        if (node.id !== "datasette-apps-bridge" && canConvert(node)) {
+          convertScript(node);
+        }
+      });
+    });
+    // A parser that yielded mid-script may have added more text since
+    // a script was converted; a script's src only takes effect when it
+    // is prepared, so re-pointing it before then is safe
+    pendingConversions.forEach(function(entry) {
+      if (entry.script.textContent !== entry.text) {
+        URL.revokeObjectURL(entry.url);
+        entry.text = entry.script.textContent;
+        pointScriptAtBlob(entry);
+      }
+    });
+    if (document.readyState !== "loading") {
+      observer.disconnect();
+    }
+  }
+
+  function rememberThrown(error) {
+    thrownByCallback = {error: error};
+    // The error event for an uncaught callback exception is dispatched
+    // before any microtask runs; anything still here afterwards was
+    // caught elsewhere
+    nativeQueueMicrotask(function() {
+      thrownByCallback = null;
+    });
+  }
+
+  function wrapCallback(callback) {
+    if (!callback || (typeof callback !== "function" && typeof callback !== "object")) {
+      return callback;
+    }
+    var wrapper = callbackWrappers.get(callback);
+    if (wrapper) {
+      return wrapper;
+    }
+    wrapper = function debugBridgeErrorCapture() {
+      try {
+        if (typeof callback === "function") {
+          return callback.apply(this, arguments);
+        }
+        return callback.handleEvent.apply(callback, arguments);
+      } catch (error) {
+        rememberThrown(error);
+        throw error;
+      }
+    };
+    callbackWrappers.set(callback, wrapper);
+    wrappedCallbacks.set(wrapper, callback);
+    return wrapper;
+  }
+
+  function wrapHandlerProperties(target) {
+    if (!target) {
+      return;
+    }
+    Object.getOwnPropertyNames(target).forEach(function(name) {
+      if (name.slice(0, 2) !== "on") {
+        return;
+      }
+      var descriptor = Object.getOwnPropertyDescriptor(target, name);
+      if (!descriptor || !descriptor.get || !descriptor.set || !descriptor.configurable) {
+        return;
+      }
+      Object.defineProperty(target, name, {
+        configurable: true,
+        enumerable: descriptor.enumerable,
+        get: function() {
+          var value = descriptor.get.call(this);
+          return (value && wrappedCallbacks.get(value)) || value;
+        },
+        set: function(value) {
+          descriptor.set.call(
+            this, typeof value === "function" ? wrapCallback(value) : value
+          );
+        }
+      });
+    });
+  }
+
+  function rewrapHandler(target, name) {
+    try {
+      var handler = target[name];
+      if (typeof handler === "function") {
+        target[name] = handler;
+      }
+    } catch (ignore) {
+    }
+  }
+
+  function wrapAppCallbacks() {
+    [
+      "setTimeout", "setInterval", "requestAnimationFrame", "queueMicrotask",
+      "requestIdleCallback"
+    ].forEach(function(name) {
+      var original = window[name];
+      if (typeof original !== "function") {
+        return;
+      }
+      window[name] = function(callback) {
+        var args = Array.prototype.slice.call(arguments);
+        if (typeof callback === "function") {
+          args[0] = wrapCallback(callback);
+        }
+        return original.apply(window, args);
+      };
+    });
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+      return nativeAddEventListener.call(this, type, wrapCallback(listener), options);
+    };
+    EventTarget.prototype.removeEventListener = function(type, listener, options) {
+      var wrapper = listener ? callbackWrappers.get(listener) : null;
+      return nativeRemoveEventListener.call(this, type, wrapper || listener, options);
+    };
+    [
+      window, window.Window, window.Document, window.Element,
+      window.HTMLElement, window.SVGElement, window.XMLHttpRequestEventTarget,
+      window.XMLHttpRequest, window.FileReader, window.MediaQueryList
+    ].forEach(function(target) {
+      wrapHandlerProperties(target === window ? window : target && target.prototype);
+    });
+    [
+      "MutationObserver", "ResizeObserver", "IntersectionObserver",
+      "PerformanceObserver"
+    ].forEach(function(name) {
+      var Original = window[name];
+      if (typeof Original !== "function" || typeof Proxy !== "function") {
+        return;
+      }
+      window[name] = new Proxy(Original, {
+        construct: function(target, args, newTarget) {
+          args = Array.prototype.slice.call(args);
+          if (typeof args[0] === "function") {
+            args[0] = wrapCallback(args[0]);
+          }
+          return Reflect.construct(target, args, newTarget);
+        }
+      });
+    });
+    // Inline on* attributes compile to handlers the browser installs
+    // itself; wrap those on the event's path just before dispatch
+    // reaches them
+    INLINE_HANDLER_EVENTS.forEach(function(type) {
+      nativeAddEventListener.call(window, type, function(event) {
+        var name = "on" + type;
+        rewrapHandler(window, name);
+        rewrapHandler(document, name);
+        var path = typeof event.composedPath === "function" ? event.composedPath() : [];
+        for (var i = 0; i < path.length; i += 1) {
+          if (path[i] && path[i].nodeType === 1 && path[i].hasAttribute(name)) {
+            rewrapHandler(path[i], name);
+          }
+        }
+      }, true);
+    });
+  }
+
+  function stackLocation(stack) {
+    var match = /((?:blob:|about:|https?:)[^\\s()@]*?):(\\d+):(\\d+)(?=\\)|\\s|$)/.exec(
+      String(stack || "")
+    );
+    return match
+      ? {url: match[1], line: Number(match[2]), column: Number(match[3])}
+      : null;
+  }
+
+  function recoverErrorDetails(details) {
+    var thrown = thrownByCallback;
+    thrownByCallback = null;
+    if (!details.sanitized) {
+      return false;
+    }
+    if (thrown) {
+      var recovered = normalizeError(thrown.error);
+      var location = stackLocation(recovered.stack);
+      Object.keys(details).forEach(function(key) {
+        delete details[key];
+      });
+      Object.keys(recovered).forEach(function(key) {
+        details[key] = recovered[key];
+      });
+      details.filename = location ? location.url : "";
+      details.lineno = location ? location.line : 0;
+      details.colno = location ? location.column : 0;
+      return false;
+    }
+    // Still sanitized: an inline script that could not be converted.
+    // Name the script whose top-level code threw.
+    var script = document.currentScript;
+    if (script && script.id !== "datasette-apps-bridge") {
+      details.script = scriptLabel(script);
+      details.message += " - thrown by the top-level code of " + details.script;
+    }
+    return false;
+  }
+
+  function describeConvertedScripts(details) {
+    var entry = details.filename && convertedScripts[details.filename];
+    if (entry) {
+      details.filename = entry.label;
+      var line = entry.text.split("\\n")[details.lineno - 1];
+      if (line !== undefined) {
+        details.sourceLine = line.trim().slice(0, 300);
+      }
+    }
+    if (details.stack) {
+      Object.keys(convertedScripts).forEach(function(url) {
+        details.stack = details.stack.split(url).join(convertedScripts[url].label);
+      });
+    }
+    return details;
+  }
+
+  if (errorsAreSanitized()) {
+    new NativeMutationObserver(convertParserScripts).observe(document, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+    wrapAppCallbacks();
+    debugErrorHandler = recoverErrorDetails;
+    debugErrorFilter = describeConvertedScripts;
+  }
 """
 
 
@@ -207,6 +583,7 @@ def iframe_bridge_script(channel_token=None, debug=False):
   var viewportReporterStarted = false;
   var debugMessageHandler = null;
   var debugErrorHandler = null;
+  var debugErrorFilter = null;
 
   function noopHistoryMethod() {
   }
@@ -315,6 +692,9 @@ def iframe_bridge_script(channel_token=None, debug=False):
 
   function postAppError(kind, details) {
     details = details || {};
+    if (debugErrorFilter) {
+      details = debugErrorFilter(details);
+    }
     details.kind = kind;
     details.timestamp = new Date().toISOString();
     postToParent({

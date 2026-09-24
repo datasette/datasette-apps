@@ -101,14 +101,29 @@ async def resolve_csp_origins(datasette, actor, requested_origins, existing_orig
     return normalized
 
 
-def build_csp(connect_origins):
+def build_csp(connect_origins, debug=False):
+    """debug=True builds the debug frame's policy, which also allows
+    blob: scripts: on engines that withhold error details for inline
+    scripts in sandboxed frames (WebKit) the debug bridge re-runs each
+    inline script as a same-text blob: script, whose errors keep their
+    details. That grants nothing 'unsafe-inline' does not - page code can
+    already run any script text it builds - and worker-src 'none' keeps
+    workers blocked, as they are in production."""
     origins = [normalize_connect_origin(origin) for origin in connect_origins]
     directives = [*BASE_DIRECTIVES]
+    if debug:
+        directives = [
+            f"{directive} blob:" if directive.startswith("script-src ") else directive
+            for directive in directives
+        ]
     if origins:
         element_sources = ["'unsafe-inline'", *origins]
-        directives.append(f"script-src-elem {' '.join(element_sources)}")
+        script_element_sources = [*element_sources, *(["blob:"] if debug else [])]
+        directives.append(f"script-src-elem {' '.join(script_element_sources)}")
         directives.append(f"style-src-elem {' '.join(element_sources)}")
     directives.append(f"img-src {' '.join(['data:', 'blob:', *origins])}")
     if origins:
         directives.append(f"connect-src {' '.join(origins)}")
+    if debug:
+        directives.append("worker-src 'none'")
     return "; ".join(directives) + ";"

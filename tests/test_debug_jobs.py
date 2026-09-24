@@ -1,11 +1,13 @@
 """Tests for debug job storage and the /-/apps/debug/* endpoints."""
 
+import html
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from datasette.app import Datasette
 
 from datasette_apps import Registry
+from datasette_apps.csp import build_csp
 from datasette_apps.debug import (
     DEFAULT_TIMEOUT_MS,
     DEFAULT_VIEWPORT,
@@ -149,6 +151,9 @@ async def test_frame_serves_job_revision_with_debug_bridge():
     assert "datasette-app-debug-eval" in document
     assert "waitFor" in document
     assert job["config"]["channel_token"] in document
+    # Debug frames allow blob: scripts, for recovering error details on
+    # engines that withhold them for inline scripts
+    assert html.escape(build_csp([], debug=True), quote=True) in document
     # Newer Datasette releases add "private" to responses for signed-in
     # actors, so check for the directive rather than the exact header
     cache_control = [
@@ -363,3 +368,6 @@ async def test_stored_app_view_has_no_debug_eval_channel():
     response = await datasette.client.get(f"/-/apps/{app['id']}", actor={"id": "alice"})
     assert response.status_code == 200
     assert "datasette-app-debug-eval" not in response.text
+    # The debug-only CSP (blob: scripts, worker-src 'none') stays out
+    assert "worker-src" not in response.text
+    assert "Content-Security-Policy" in response.text
