@@ -191,11 +191,14 @@ def debug_job_is_expired(job):
 
 
 async def expire_debug_job(datasette, job_id):
-    await datasette.get_internal_database().execute_write(
+    """Mark a pending job expired. Returns True only if this call flipped
+    the row - a concurrent request may already have expired it."""
+    result = await datasette.get_internal_database().execute_write(
         "UPDATE _app_debug_jobs SET status = 'expired' "
         "WHERE id = ? AND status = 'pending'",
         [job_id],
     )
+    return result.rowcount > 0
 
 
 def debug_task_payload(datasette, job):

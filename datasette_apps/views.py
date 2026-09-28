@@ -28,7 +28,7 @@ from .permissions import AppResource, AppsResource
 from .prompt import build_llm_prompt_data, stored_query_options
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
 from .registry import Registry
-from .telemetry_registry import APP_ID
+from .telemetry_registry import APP_ID, DEBUG_JOB_ID
 from .utils import sort_names_with_underscores_last
 
 
@@ -747,11 +747,21 @@ async def _running_debug_job_or_403(datasette, request):
     query endpoints stop serving."""
     job = await _debug_job_or_404(datasette, request)
     if job["status"] == "pending" and debug_job_is_expired(job):
-        await expire_debug_job(datasette, job["id"])
+        if await expire_debug_job(datasette, job["id"]):
+            telemetry.record_debug_job_expired()
         job = await get_debug_job(datasette, job["id"])
     if job["status"] != "pending":
         raise Forbidden("Debug job is not running")
     return job
+
+
+def _annotate_debug_request(request, job):
+    """Tag the request span with the job and its app. Only called once the
+    job is known to exist, is running and belongs to the actor, so a probe
+    with a made-up job ID records nothing."""
+    telemetry.annotate_request(
+        request, {DEBUG_JOB_ID: job["id"], APP_ID: job["app_id"]}
+    )
 
 
 async def debug_frame(datasette, request):
@@ -761,6 +771,7 @@ async def debug_frame(datasette, request):
     browser would render on direct navigation."""
     job = await _running_debug_job_or_403(datasette, request)
     _require_debug_job_actor(request, job)
+    _annotate_debug_request(request, job)
     token = request.args.get("token") or ""
     # The harness fetches this same-origin with credentials, so the
     # actor check above is the primary gate; the token (handed out only
@@ -790,6 +801,7 @@ async def debug_frame(datasette, request):
 async def debug_query(datasette, request):
     job = await _running_debug_job_or_403(datasette, request)
     _require_debug_job_actor(request, job)
+    _annotate_debug_request(request, job)
     app = await Registry(datasette).get_app(job["app_id"])
     if app is None:
         raise NotFound("App not found")

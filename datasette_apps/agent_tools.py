@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime, timezone
 
 from datasette_agent_edit import EditError, EditToolset, Editable, NotFound
 
@@ -19,7 +20,7 @@ from .debug import (
 )
 from .permissions import AppResource, AppsResource
 from .registry import Registry, _fts_query
-from .telemetry_registry import APP_ID, TOOL_RESULT
+from .telemetry_registry import APP_ID, DEBUG_JOB_ID, DEBUG_OUTCOME, TOOL_RESULT
 
 APP_RUNTIME_API_GUIDANCE = (
     " Apps run in a sandboxed iframe. For data access, use "
@@ -490,11 +491,81 @@ def _csp_origins_schema_description(datasette=None):
     )
 
 
+# apps.tool.result for each apps.debug.outcome: the debug machinery did its
+# job for ok, script_error and timed_out, even if the script itself failed.
+_DEBUG_TOOL_RESULTS = {
+    "ok": "ok",
+    "script_error": "ok",
+    "timed_out": "ok",
+    "denied": "denied",
+}
+
+
+def _debug_outcome(outcome, envelope):
+    """Classify a terminal app_debug run for ``apps.debug.outcome``.
+
+    Order matters: the harness's timeout envelope sets both ``ok: false``
+    and ``timed_out: true``, so ``timed_out`` is checked before ``ok``.
+    """
+    task_outcome = outcome.get("outcome")
+    if task_outcome == "expired":
+        return "task_expired"
+    if task_outcome == "cancelled":
+        return "task_cancelled"
+    if envelope["timed_out"]:
+        return "timed_out"
+    if envelope["ok"]:
+        return "ok"
+    return "script_error"
+
+
+def _seconds_since(iso_timestamp):
+    try:
+        started = datetime.fromisoformat(iso_timestamp)
+    except (TypeError, ValueError):
+        return None
+    return (datetime.now(timezone.utc) - started).total_seconds()
+
+
+async def _finish_debug(
+    datasette,
+    result,
+    outcome,
+    *,
+    app_id,
+    job=None,
+    run_seconds=None,
+    script_seconds=None,
+):
+    """Record one terminal app_debug execution and tag the current (tool)
+    span. Never called on the suspending first execution: that one exits
+    through the BrowserTaskPending raise. Returns ``result`` unchanged."""
+    telemetry.record_debug_run(outcome, run_seconds, script_seconds)
+    if job is not None:
+        known_app_id = job["app_id"]
+    else:
+        known_app_id = await _existing_stored_app_id(datasette, app_id)
+    telemetry.annotate_current_span(
+        {
+            APP_ID: known_app_id,
+            DEBUG_JOB_ID: job["id"] if job is not None else None,
+            DEBUG_OUTCOME: outcome,
+            TOOL_RESULT: _DEBUG_TOOL_RESULTS.get(outcome, "error"),
+        }
+    )
+    return result
+
+
 async def _app_debug(
     datasette, actor, context, app_id, javascript, viewport=None, timeout_ms=None
 ):
     if not await _can_edit_app(datasette, actor, app_id):
-        return _error("Permission denied: edit-app", app_id=app_id)
+        return await _finish_debug(
+            datasette,
+            _error("Permission denied: edit-app", app_id=app_id),
+            "denied",
+            app_id=app_id,
+        )
     conversation_id = getattr(context, "conversation_id", None)
     call_key = getattr(context, "call_key", None)
     # Re-executing a suspended call (after its browser task finishes)
@@ -519,7 +590,9 @@ async def _app_debug(
                 call_key=call_key,
             )
         except ValueError as e:
-            return _error(str(e), app_id=app_id)
+            return await _finish_debug(
+                datasette, _error(str(e), app_id=app_id), "invalid", app_id=app_id
+            )
     app = await Registry(datasette).get_app(app_id)
     try:
         outcome = await context.browser_task(
@@ -534,10 +607,16 @@ async def _app_debug(
         # Matched by name so datasette-agent stays an optional dependency;
         # BrowserTaskPending (an llm.PauseChain) must keep propagating.
         if e.__class__.__name__ == "BrowserTasksNotSupported":
-            return _error(
-                "app_debug requires an interactive conversation with the "
-                "chat open in a browser; it is not available here",
+            return await _finish_debug(
+                datasette,
+                _error(
+                    "app_debug requires an interactive conversation with the "
+                    "chat open in a browser; it is not available here",
+                    app_id=app_id,
+                ),
+                "unsupported",
                 app_id=app_id,
+                job=job,
             )
         raise
     if not isinstance(outcome, dict):
@@ -545,6 +624,12 @@ async def _app_debug(
     envelope = normalize_envelope(outcome)
     # The audit record: what ran and what came back
     await complete_debug_job(datasette, job["id"], envelope)
+    # Wall-clock time the user waited, including the browser claiming the
+    # task; the script's own duration is browser-reported (normalize_envelope
+    # has coerced it to int or None).
+    run_seconds = _seconds_since(job["created_at"])
+    duration_ms = envelope["duration_ms"]
+    script_seconds = duration_ms / 1000 if duration_ms is not None else None
     payload = {
         "app_id": app_id,
         "version": job["version"],
@@ -553,7 +638,15 @@ async def _app_debug(
     payload.update(cap_envelope(envelope))
     if payload.get("error") is None:
         payload.pop("error", None)
-    return json.dumps(payload)
+    return await _finish_debug(
+        datasette,
+        json.dumps(payload),
+        _debug_outcome(outcome, envelope),
+        app_id=app_id,
+        job=job,
+        run_seconds=run_seconds,
+        script_seconds=script_seconds,
+    )
 
 
 def get_app_edit_tools(AgentTool, datasette=None):
