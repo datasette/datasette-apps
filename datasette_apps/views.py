@@ -429,6 +429,7 @@ async def create_app(datasette, request):
         stored_queries=stored_queries,
         csp_origins=csp_origins,
     )
+    telemetry.record_change("create", "web")
     return Response.redirect(app["path"])
 
 
@@ -557,6 +558,7 @@ async def edit_app(datasette, request):
         actor_id=actor_id,
         **update_kwargs,
     )
+    telemetry.record_change("edit", "web")
     return Response.redirect(f"/-/apps/{app_id}")
 
 
@@ -584,6 +586,7 @@ async def delete_app(datasette, request):
         await registry.delete_stored_app(app_id, actor_id=_actor_id(actor))
     except (KeyError, ValueError) as e:
         raise NotFound("App not found") from e
+    telemetry.record_change("delete", "web")
     return Response.redirect("/-/apps")
 
 
@@ -647,6 +650,7 @@ async def pin_app(datasette, request):
     telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     await registry.set_pinned(_actor_id(actor), app_id, True)
+    telemetry.record_change("pin", "web")
     return await _redirect_after_pin(request)
 
 
@@ -659,6 +663,7 @@ async def unpin_app(datasette, request):
     telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     await registry.set_pinned(_actor_id(actor), app_id, False)
+    telemetry.record_change("unpin", "web")
     return await _redirect_after_pin(request)
 
 

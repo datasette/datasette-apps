@@ -55,7 +55,10 @@ APP_ID = Attribute(
     "apps.app_id",
     "The app's ID: a ULID for stored apps, or a plugin-supplied ID for "
     "external apps. Unbounded, so it rides on spans only - **never on a "
-    "metric**.",
+    "metric**. Also set on the current span inside this plugin's agent "
+    "tools, which with datasette-agent's telemetry is its ``execute_tool`` "
+    "span - an attribute from this plugin on a span in the "
+    "``datasette_agent`` scope.",
 )
 DEBUG_JOB_ID = Attribute(
     "apps.debug.job_id",
@@ -119,7 +122,11 @@ TOOL_RESULT = Attribute(
     "apps.tool.result",
     "How one of this plugin's agent tools ended: ``ok``, ``error`` or "
     "``denied`` (the actor lacked permission). Set on the current tool span "
-    "(datasette-agent's ``execute_tool`` span), not on a span of our own.",
+    "(datasette-agent's ``execute_tool`` span), not on a span of our own, "
+    "so it sits in the ``datasette_agent`` scope; with a datasette-agent "
+    "that has no telemetry it lands on whatever span is current, or "
+    "nowhere. Set only when the tool returns: an exception escaping the "
+    "tool leaves it unset.",
     values={"ok", "error", "denied"},
 )
 DEBUG_OUTCOME = Attribute(
@@ -195,7 +202,12 @@ M_CHANGES = MetricName(
     COUNTER,
     "{change}",
     "App changes (create, edit, delete, pin, unpin), by operation and "
-    "whether they came from the web UI or the agent.",
+    "whether they came from the web UI or the agent. Counted only after the "
+    "write succeeded. An edit is one submitted and saved edit form or agent "
+    "edit call (an ``app_edit`` batch counts once), even when nothing "
+    "changed and no revision was written. Apps registered by other plugins "
+    "through the ``Registry`` API (``add_app``/``add_apps``) are not "
+    "counted.",
     attributes=(CHANGE_OPERATION, CHANGE_VIA),
 )
 M_DEBUG_RUNS = MetricName(

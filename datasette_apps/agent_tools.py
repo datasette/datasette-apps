@@ -5,6 +5,7 @@ import json
 
 from datasette_agent_edit import EditError, EditToolset, Editable, NotFound
 
+from . import telemetry
 from .csp import configured_csp_allowlist, resolve_csp_origins
 from .debug import (
     BROWSER_TASK_SLACK_MS,
@@ -18,6 +19,7 @@ from .debug import (
 )
 from .permissions import AppResource, AppsResource
 from .registry import Registry, _fts_query
+from .telemetry_registry import APP_ID, TOOL_RESULT
 
 APP_RUNTIME_API_GUIDANCE = (
     " Apps run in a sandboxed iframe. For data access, use "
@@ -153,6 +155,9 @@ class StoredAppHtmlStore:
             raise NotFound(ref) from e
         if version is None:
             raise NotFound(ref)
+        # One call is one saved edit, however many operations app_edit
+        # batched into it; a failed transform raised above and never counts.
+        telemetry.record_change("edit", "agent")
         app = await self.registry.get_app(ref)
         return Editable(
             ref=ref,
@@ -226,6 +231,40 @@ def _error(message, app_id=None):
     return json.dumps(payload)
 
 
+def _tool_result(result):
+    """Classify a tool's returned JSON string as ``ok``/``error``/``denied``.
+
+    Our tools (and datasette-agent-edit's ``EditToolset``) report failures
+    as a returned ``{"error": ...}`` object rather than raising. The message
+    is only matched on its prefix, never recorded.
+    """
+    if not isinstance(result, str) or '"error"' not in result:
+        return "ok"
+    try:
+        payload = json.loads(result)
+    except ValueError:
+        return "ok"
+    if not isinstance(payload, dict) or "error" not in payload:
+        return "ok"
+    message = payload["error"]
+    if isinstance(message, str) and message.startswith("Permission denied"):
+        return "denied"
+    return "error"
+
+
+def _annotate_tool(result, app_id=None):
+    """Tag the current span - datasette-agent's ``execute_tool`` span when it
+    has telemetry - with the app ID and how the tool ended. Returns
+    ``result`` unchanged."""
+    telemetry.annotate_current_span(
+        {
+            APP_ID: app_id if isinstance(app_id, str) and app_id else None,
+            TOOL_RESULT: _tool_result(result),
+        }
+    )
+    return result
+
+
 async def _app_create(
     datasette,
     actor,
@@ -238,7 +277,7 @@ async def _app_create(
     csp_origins=None,
 ):
     if not await _can_create_app(datasette, actor):
-        return _error("Permission denied: create-app")
+        return _annotate_tool(_error("Permission denied: create-app"))
     try:
         csp_origins = await resolve_csp_origins(datasette, actor, csp_origins or [])
         app = await Registry(datasette).create_stored_app(
@@ -252,8 +291,9 @@ async def _app_create(
             csp_origins=csp_origins or [],
         )
     except ValueError as e:
-        return _error(str(e))
-    return json.dumps(
+        return _annotate_tool(_error(str(e)))
+    telemetry.record_change("create", "agent")
+    result = json.dumps(
         {
             "app_id": app["id"],
             "name": app["name"],
@@ -269,15 +309,16 @@ async def _app_create(
             ),
         }
     )
+    return _annotate_tool(result, app["id"])
 
 
 async def _app_list(datasette, actor, query=None, limit=10):
     try:
         limit = int(limit)
     except (TypeError, ValueError):
-        return _error("limit must be an integer between 1 and 20")
+        return _annotate_tool(_error("limit must be an integer between 1 and 20"))
     if limit < 1 or limit > 20:
-        return _error("limit must be an integer between 1 and 20")
+        return _annotate_tool(_error("limit must be an integer between 1 and 20"))
 
     await Registry(datasette).ensure_tables()
     allowed_sql, allowed_params = await datasette.allowed_resources_sql(
@@ -299,13 +340,15 @@ async def _app_list(datasette, actor, query=None, limit=10):
     if query:
         fts_query = _fts_query(query)
         if not fts_query:
-            return json.dumps(
-                {
-                    "query": query,
-                    "apps": [],
-                    "returned_count": 0,
-                    "has_more": False,
-                }
+            return _annotate_tool(
+                json.dumps(
+                    {
+                        "query": query,
+                        "apps": [],
+                        "returned_count": 0,
+                        "has_more": False,
+                    }
+                )
             )
         join_search = "JOIN apps_fts ON apps.rowid = apps_fts.rowid"
         search_filter = "AND apps_fts MATCH :fts_query"
@@ -383,20 +426,45 @@ async def _app_list(datasette, actor, query=None, limit=10):
         }
         for row in rows[:limit]
     ]
-    return json.dumps(
-        {
-            "query": query,
-            "apps": apps,
-            "returned_count": len(apps),
-            "has_more": has_more,
-        }
+    return _annotate_tool(
+        json.dumps(
+            {
+                "query": query,
+                "apps": apps,
+                "returned_count": len(apps),
+                "has_more": has_more,
+            }
+        )
     )
+
+
+async def _existing_stored_app_id(datasette, app_id):
+    """``app_id`` if it names an existing, non-deleted stored app, else None.
+
+    ``app_id`` is model-supplied text, so it is only recorded on a span once
+    it is known to be a real app - the same rule as the app routes, which
+    tag the request span only after their 404 check.
+    """
+    if not isinstance(app_id, str) or not app_id:
+        return None
+    app = await Registry(datasette).get_app(app_id)
+    if app is None or app["external"]:
+        return None
+    return app_id
 
 
 async def _with_app_edit_permission(datasette, actor, app_id, callback):
     if not await _can_edit_app(datasette, actor, app_id):
-        return _error("Permission denied: edit-app", app_id=app_id)
-    return await callback()
+        result = _error("Permission denied: edit-app", app_id=app_id)
+    else:
+        result = await callback()
+    # EditToolset only succeeds after reading or editing the stored app, so
+    # an ok result proves the ID; anything else needs a lookup.
+    if _tool_result(result) == "ok":
+        known_app_id = app_id
+    else:
+        known_app_id = await _existing_stored_app_id(datasette, app_id)
+    return _annotate_tool(result, known_app_id)
 
 
 def _csp_origins_schema_description(datasette=None):
