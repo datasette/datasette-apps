@@ -26,6 +26,7 @@ from importlib.metadata import PackageNotFoundError, version
 from datasette.telemetry import request_span
 from opentelemetry import metrics as otel_metrics
 from opentelemetry import trace as otel_trace
+from opentelemetry.propagate import inject
 from opentelemetry.trace import Status, StatusCode
 
 from . import telemetry_registry as reg
@@ -162,6 +163,24 @@ def record_debug_run(outcome, run_seconds=None, script_seconds=None):
 def record_debug_job_expired():
     "Count one pending debug job flipped to expired."
     debug_jobs_expired.add(1)
+
+
+def trace_headers():
+    """W3C trace context headers for the current span, for ``datasette.client``.
+
+    Core's ``TelemetryMiddleware`` starts every request's SERVER span from
+    ``extract(headers)``, which falls back to an empty context rather than
+    the current one, so without these headers an internal
+    ``datasette.client`` request lands in a separate trace instead of
+    nesting under the span that made it. Workaround for
+    https://github.com/simonw/datasette/issues/2969 - remove once the
+    minimum Datasette version propagates context itself. Uses the global
+    propagator, so ``OTEL_PROPAGATORS=none`` turns it off; with no provider
+    installed it returns ``{}``.
+    """
+    headers = {}
+    inject(headers)
+    return headers
 
 
 class QueryRecorder:
