@@ -34,7 +34,9 @@ __all__ = [
     "DEBUG_SCRIPT_BUCKETS",
     "DURATION_BUCKETS",
     "METRICS",
+    "REQUEST_SPAN_ATTRIBUTES",
     "SPANS",
+    "TOOL_SPAN_ATTRIBUTES",
 ]
 
 # --- Histogram bucket boundaries ------------------------------------------
@@ -55,16 +57,23 @@ APP_ID = Attribute(
     "apps.app_id",
     "The app's ID: a ULID for stored apps, or a plugin-supplied ID for "
     "external apps. Unbounded, so it rides on spans only - **never on a "
-    "metric**. Also set on the current span inside this plugin's agent "
-    "tools, which with datasette-agent's telemetry is its ``execute_tool`` "
-    "span - an attribute from this plugin on a span in the "
-    "``datasette_agent`` scope.",
+    "metric**. Besides ``apps.query``, it is added to spans this plugin "
+    "does not own: core's HTTP request span for the app's routes (view, "
+    "JSON, edit, delete, revision, pin, unpin, launch, query, and the "
+    "``app_debug`` frame and query routes), and the current span inside "
+    "this plugin's agent tools, which with datasette-agent's telemetry is "
+    "its ``execute_tool`` span in the ``datasette_agent`` scope. Only "
+    "recorded once the ID is known to name a real app, so a made-up ID in "
+    "a URL or a tool argument is never recorded.",
 )
 DEBUG_JOB_ID = Attribute(
     "apps.debug.job_id",
     "The ``_app_debug_jobs.id`` (a ULID) of an ``app_debug`` run. Spans "
     "only - **never on a metric**. Present on ``apps.query`` only for "
-    "queries made by a debug run.",
+    "queries made by a debug run. Also added to core's HTTP request span "
+    "for the debug run's ``/frame`` and ``/query`` routes (once the job is "
+    "known to be running and to belong to the actor) and to the "
+    "``app_debug`` tool span.",
     optional=True,
 )
 QUERY_SOURCE = Attribute(
@@ -77,8 +86,8 @@ QUERY_SOURCE = Attribute(
 QUERY_KIND = Attribute(
     "apps.query.kind",
     "``sql`` for ``datasette.query()``, ``stored`` for "
-    "``datasette.storedQuery()``. Absent when the request body could not be "
-    "parsed.",
+    "``datasette.storedQuery()``. Absent when the request body is not valid "
+    "JSON.",
     optional=True,
     values={"sql", "stored"},
 )
@@ -126,7 +135,8 @@ TOOL_RESULT = Attribute(
     "so it sits in the ``datasette_agent`` scope; with a datasette-agent "
     "that has no telemetry it lands on whatever span is current, or "
     "nowhere. Set only when the tool returns: an exception escaping the "
-    "tool leaves it unset.",
+    "tool leaves it unset (a datasette-agent version with telemetry "
+    "records ``error.type`` on its own span).",
     values={"ok", "error", "denied"},
 )
 DEBUG_OUTCOME = Attribute(
@@ -138,7 +148,9 @@ DEBUG_OUTCOME = Attribute(
     "cancelled before a result came back. ``denied``: the actor may not edit "
     "the app. ``invalid``: the debug request was rejected (e.g. a bad "
     "viewport). ``unsupported``: the agent host does not support browser "
-    "tasks.",
+    "tasks. Also set on the ``app_debug`` tool span alongside "
+    "``apps.tool.result``. There is no ``error`` outcome: an exception "
+    "escaping the tool records nothing.",
     values={
         "ok",
         "script_error",
@@ -161,8 +173,17 @@ QUERY = SpanName(
     "internal ``datasette.client`` call to Datasette's JSON API, which nests "
     "inside as a SERVER span tagged ``datasette.internal_client``. Only an "
     "unexpected exception (outcome ``error``) sets status ``ERROR``; "
-    "exception messages are never recorded. ``db.namespace`` is set only "
-    "once the database has passed the app's allowlist.",
+    "exception messages are never recorded. ``db.namespace`` reuses core's "
+    "attribute, which is declared as always present, but here it is set "
+    "only once the database has passed the app's allowlist - so it is "
+    "absent for ``invalid`` and ``not_allowed`` queries, and the requested "
+    "database name is never recorded unvetted. The internal request nests "
+    "under this span because the plugin injects W3C trace context headers "
+    "into it with the global propagator, a workaround for "
+    "https://github.com/simonw/datasette/issues/2969: with the default "
+    "propagator core would otherwise start it as a new trace. With "
+    "``OTEL_PROPAGATORS=none`` nothing is injected, but core extracts "
+    "nothing either, so it still nests.",
     attributes=(
         APP_ID,
         QUERY_SOURCE,
@@ -215,7 +236,9 @@ M_DEBUG_RUNS = MetricName(
     COUNTER,
     "{run}",
     "Terminal ``app_debug`` tool executions, by outcome. The first "
-    "execution that suspends waiting for the browser is not counted.",
+    "execution that suspends waiting for the browser is not counted, and "
+    "neither is an execution that ends in an escaped exception (there is "
+    "no ``error`` outcome).",
     attributes=(DEBUG_OUTCOME,),
 )
 M_DEBUG_RUN_DURATION = MetricName(
@@ -246,6 +269,12 @@ M_DEBUG_JOBS_EXPIRED = MetricName(
     "only when a row actually changed.",
 )
 
+
+# Attributes this plugin adds to spans it does not own. The scoped
+# conformance helpers never see them, so the conformance test and the
+# generated README reference list them from here.
+REQUEST_SPAN_ATTRIBUTES = (APP_ID, DEBUG_JOB_ID)
+TOOL_SPAN_ATTRIBUTES = (APP_ID, DEBUG_JOB_ID, TOOL_RESULT, DEBUG_OUTCOME)
 
 SPANS = (QUERY,)
 

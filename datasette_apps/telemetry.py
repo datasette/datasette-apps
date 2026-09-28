@@ -175,8 +175,10 @@ def trace_headers():
     nesting under the span that made it. Workaround for
     https://github.com/simonw/datasette/issues/2969 - remove once the
     minimum Datasette version propagates context itself. Uses the global
-    propagator, so ``OTEL_PROPAGATORS=none`` turns it off; with no provider
-    installed it returns ``{}``.
+    propagator: with ``OTEL_PROPAGATORS=none`` it injects nothing, but core
+    then extracts nothing either (the empty composite propagator returns no
+    context), so the internal request still nests under the current span.
+    With no provider installed it returns ``{}``.
     """
     headers = {}
     inject(headers)

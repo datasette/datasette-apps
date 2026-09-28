@@ -1,5 +1,8 @@
 """Static checks on datasette-apps' telemetry registry (no SDK needed)."""
 
+import importlib.util
+from pathlib import Path
+
 from datasette_apps.telemetry_registry import (
     APP_ID,
     ATTRIBUTES,
@@ -7,8 +10,12 @@ from datasette_apps.telemetry_registry import (
     DEBUG_JOB_ID,
     HISTOGRAM,
     METRICS,
+    REQUEST_SPAN_ATTRIBUTES,
     SPANS,
+    TOOL_SPAN_ATTRIBUTES,
 )
+
+ROOT = Path(__file__).resolve().parent.parent
 
 # Core's semantic-convention names, deliberately reused rather than shadowed.
 CORE_ATTRIBUTES = {"db.namespace", "error.type"}
@@ -100,3 +107,32 @@ def test_only_histograms_have_increasing_buckets():
             ), f"{metric!r} buckets are not strictly increasing"
         else:
             assert metric.buckets is None, f"{metric!r} is not a histogram"
+
+
+def test_every_attribute_is_used():
+    # Declared-but-dead attributes are documentation for a signal that does
+    # not exist. Attributes set only on spans this plugin does not own
+    # (core's request spans, the agent tool span) count via their tuples.
+    used = set(REQUEST_SPAN_ATTRIBUTES) | set(TOOL_SPAN_ATTRIBUTES)
+    for entry in (*SPANS, *METRICS):
+        used.update(entry.attributes)
+    unused = [str(attribute) for attribute in ATTRIBUTES if attribute not in used]
+    assert not unused, f"registered but never used: {unused}"
+    registered = set(ATTRIBUTES)
+    for attribute in (*REQUEST_SPAN_ATTRIBUTES, *TOOL_SPAN_ATTRIBUTES):
+        assert attribute in registered, attribute
+
+
+def test_generated_docs_are_fresh():
+    # In-process rather than a subprocess: the same renderer as
+    # `uv run scripts/telemetry-doc.py --check`.
+    spec = importlib.util.spec_from_file_location(
+        "telemetry_doc", ROOT / "scripts" / "telemetry-doc.py"
+    )
+    telemetry_doc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(telemetry_doc)
+    readme = (ROOT / "README.md").read_text()
+    assert telemetry_doc.rendered_readme(readme) == readme, (
+        "README.md telemetry reference is stale; run "
+        "`uv run scripts/telemetry-doc.py`"
+    )

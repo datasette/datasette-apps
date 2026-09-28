@@ -540,6 +540,7 @@ async def _finish_debug(
     """Record one terminal app_debug execution and tag the current (tool)
     span. Never called on the suspending first execution: that one exits
     through the BrowserTaskPending raise. Returns ``result`` unchanged."""
+    outcome = telemetry.clamp(outcome, DEBUG_OUTCOME.values, None)
     telemetry.record_debug_run(outcome, run_seconds, script_seconds)
     if job is not None:
         known_app_id = job["app_id"]
