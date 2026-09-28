@@ -17,6 +17,7 @@ from .csp import (
     configured_csp_allowlist,
     resolve_csp_origins,
 )
+from . import telemetry
 from .data_access import AppQueryError, run_app_query, run_app_stored_query
 from .debug import (
     debug_job_is_expired,
@@ -27,6 +28,7 @@ from .permissions import AppResource, AppsResource
 from .prompt import build_llm_prompt_data, stored_query_options
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
 from .registry import Registry
+from .telemetry_registry import APP_ID, DEBUG_JOB_ID
 from .utils import sort_names_with_underscores_last
 
 
@@ -427,6 +429,7 @@ async def create_app(datasette, request):
         stored_queries=stored_queries,
         csp_origins=csp_origins,
     )
+    telemetry.record_change("create", "web")
     return Response.redirect(app["path"])
 
 
@@ -437,6 +440,7 @@ async def view_app(datasette, request):
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     version = await registry.get_current_version(app_id)
     state = None
@@ -480,6 +484,7 @@ async def edit_app(datasette, request):
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "edit-app", app_id)
     if request.method == "GET":
         version = await registry.get_current_version(app_id)
@@ -553,6 +558,7 @@ async def edit_app(datasette, request):
         actor_id=actor_id,
         **update_kwargs,
     )
+    telemetry.record_change("edit", "web")
     return Response.redirect(f"/-/apps/{app_id}")
 
 
@@ -563,6 +569,7 @@ async def delete_app(datasette, request):
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "delete-app", app_id)
     if request.method == "GET":
         return Response.html(
@@ -579,6 +586,7 @@ async def delete_app(datasette, request):
         await registry.delete_stored_app(app_id, actor_id=_actor_id(actor))
     except (KeyError, ValueError) as e:
         raise NotFound("App not found") from e
+    telemetry.record_change("delete", "web")
     return Response.redirect("/-/apps")
 
 
@@ -590,6 +598,7 @@ async def app_revision(datasette, request):
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "edit-app", app_id)
     version = await registry.get_version(app_id, revision_number)
     if version is None:
@@ -626,6 +635,7 @@ async def app_json(datasette, request):
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     version = await registry.get_current_version(app_id)
     return Response.json({"app": app, "version": version})
@@ -637,8 +647,10 @@ async def pin_app(datasette, request):
     registry = Registry(datasette)
     if await registry.get_app(app_id) is None:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     await registry.set_pinned(_actor_id(actor), app_id, True)
+    telemetry.record_change("pin", "web")
     return await _redirect_after_pin(request)
 
 
@@ -648,8 +660,10 @@ async def unpin_app(datasette, request):
     registry = Registry(datasette)
     if await registry.get_app(app_id) is None:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     await registry.set_pinned(_actor_id(actor), app_id, False)
+    telemetry.record_change("unpin", "web")
     return await _redirect_after_pin(request)
 
 
@@ -660,34 +674,59 @@ async def app_query(datasette, request):
     app = await registry.get_app(app_id)
     if app is None or app["external"]:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
-    try:
-        body = json.loads((await request.post_body()).decode("utf-8") or "{}")
-        if "query" in body:
-            # Keep stored query execution server-side so permission revocations
-            # apply immediately to app pages that are already loaded in browsers.
-            result = await run_app_stored_query(
-                datasette,
-                app,
-                actor,
-                body["database"],
-                body["query"],
-                body.get("params"),
-            )
-        else:
-            result = await run_app_query(
-                datasette,
-                app,
-                actor,
-                body["database"],
-                body["sql"],
-                body.get("params"),
-            )
-        return Response.json({"ok": True, "result": result})
-    except (KeyError, json.JSONDecodeError) as e:
-        return Response.json({"ok": False, "error": f"Invalid request: {e}"})
-    except AppQueryError as e:
-        return Response.json({"ok": False, "error": str(e)})
+    return await _run_query_request(datasette, request, app, source="app")
+
+
+async def _run_query_request(datasette, request, app, *, source, job_id=None):
+    """Parse an app's query request body and run it as the request's actor.
+
+    Shared by ``app_query`` and ``debug_query``, and wrapped in one
+    ``apps.query`` span. Rejections return HTTP 200 with ``ok: false``; only
+    unexpected exceptions escape (and are recorded as outcome ``error``).
+    """
+    with telemetry.query_span(source=source, app_id=app["id"], job_id=job_id) as q:
+        try:
+            body = json.loads((await request.post_body()).decode("utf-8") or "{}")
+            # No body.get() before dispatch: a non-dict body must keep
+            # raising exactly what it raised before.
+            if "query" in body:
+                q.kind = "stored"
+                # Keep stored query execution server-side so permission
+                # revocations apply immediately to app pages that are already
+                # loaded in browsers.
+                result = await run_app_stored_query(
+                    datasette,
+                    app,
+                    request.actor,
+                    body["database"],
+                    body["query"],
+                    body.get("params"),
+                    recorder=q,
+                )
+            else:
+                q.kind = "sql"
+                result = await run_app_query(
+                    datasette,
+                    app,
+                    request.actor,
+                    body["database"],
+                    body["sql"],
+                    body.get("params"),
+                    recorder=q,
+                )
+            q.outcome = "ok"
+            if not q.write:
+                # Stored write queries return Datasette's raw JSON, not rows.
+                q.rows = len(result.get("rows") or [])
+            return Response.json({"ok": True, "result": result})
+        except (KeyError, json.JSONDecodeError) as e:
+            q.outcome = "invalid"
+            return Response.json({"ok": False, "error": f"Invalid request: {e}"})
+        except AppQueryError as e:
+            q.outcome = e.outcome
+            return Response.json({"ok": False, "error": str(e)})
 
 
 async def _debug_job_or_404(datasette, request):
@@ -708,11 +747,21 @@ async def _running_debug_job_or_403(datasette, request):
     query endpoints stop serving."""
     job = await _debug_job_or_404(datasette, request)
     if job["status"] == "pending" and debug_job_is_expired(job):
-        await expire_debug_job(datasette, job["id"])
+        if await expire_debug_job(datasette, job["id"]):
+            telemetry.record_debug_job_expired()
         job = await get_debug_job(datasette, job["id"])
     if job["status"] != "pending":
         raise Forbidden("Debug job is not running")
     return job
+
+
+def _annotate_debug_request(request, job):
+    """Tag the request span with the job and its app. Only called once the
+    job is known to exist, is running and belongs to the actor, so a probe
+    with a made-up job ID records nothing."""
+    telemetry.annotate_request(
+        request, {DEBUG_JOB_ID: job["id"], APP_ID: job["app_id"]}
+    )
 
 
 async def debug_frame(datasette, request):
@@ -722,6 +771,7 @@ async def debug_frame(datasette, request):
     browser would render on direct navigation."""
     job = await _running_debug_job_or_403(datasette, request)
     _require_debug_job_actor(request, job)
+    _annotate_debug_request(request, job)
     token = request.args.get("token") or ""
     # The harness fetches this same-origin with credentials, so the
     # actor check above is the primary gate; the token (handed out only
@@ -751,34 +801,13 @@ async def debug_frame(datasette, request):
 async def debug_query(datasette, request):
     job = await _running_debug_job_or_403(datasette, request)
     _require_debug_job_actor(request, job)
+    _annotate_debug_request(request, job)
     app = await Registry(datasette).get_app(job["app_id"])
     if app is None:
         raise NotFound("App not found")
-    try:
-        body = json.loads((await request.post_body()).decode("utf-8") or "{}")
-        if "query" in body:
-            result = await run_app_stored_query(
-                datasette,
-                app,
-                request.actor,
-                body["database"],
-                body["query"],
-                body.get("params"),
-            )
-        else:
-            result = await run_app_query(
-                datasette,
-                app,
-                request.actor,
-                body["database"],
-                body["sql"],
-                body.get("params"),
-            )
-        return Response.json({"ok": True, "result": result})
-    except (KeyError, json.JSONDecodeError) as e:
-        return Response.json({"ok": False, "error": f"Invalid request: {e}"})
-    except AppQueryError as e:
-        return Response.json({"ok": False, "error": str(e)})
+    return await _run_query_request(
+        datasette, request, app, source="debug", job_id=job["id"]
+    )
 
 
 async def launch_app(datasette, request):
@@ -788,6 +817,7 @@ async def launch_app(datasette, request):
     app = await registry.get_app(app_id)
     if app is None:
         raise NotFound("App not found")
+    telemetry.annotate_request(request, {APP_ID: app_id})
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     if not app["external"]:
         return Response.redirect(app["path"])

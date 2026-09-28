@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime, timezone
 
 from datasette_agent_edit import EditError, EditToolset, Editable, NotFound
 
+from . import telemetry
 from .csp import configured_csp_allowlist, resolve_csp_origins
 from .debug import (
     BROWSER_TASK_SLACK_MS,
@@ -18,6 +20,7 @@ from .debug import (
 )
 from .permissions import AppResource, AppsResource
 from .registry import Registry, _fts_query
+from .telemetry_registry import APP_ID, DEBUG_JOB_ID, DEBUG_OUTCOME, TOOL_RESULT
 
 APP_RUNTIME_API_GUIDANCE = (
     " Apps run in a sandboxed iframe. For data access, use "
@@ -153,6 +156,9 @@ class StoredAppHtmlStore:
             raise NotFound(ref) from e
         if version is None:
             raise NotFound(ref)
+        # One call is one saved edit, however many operations app_edit
+        # batched into it; a failed transform raised above and never counts.
+        telemetry.record_change("edit", "agent")
         app = await self.registry.get_app(ref)
         return Editable(
             ref=ref,
@@ -226,6 +232,40 @@ def _error(message, app_id=None):
     return json.dumps(payload)
 
 
+def _tool_result(result):
+    """Classify a tool's returned JSON string as ``ok``/``error``/``denied``.
+
+    Our tools (and datasette-agent-edit's ``EditToolset``) report failures
+    as a returned ``{"error": ...}`` object rather than raising. The message
+    is only matched on its prefix, never recorded.
+    """
+    if not isinstance(result, str) or '"error"' not in result:
+        return "ok"
+    try:
+        payload = json.loads(result)
+    except ValueError:
+        return "ok"
+    if not isinstance(payload, dict) or "error" not in payload:
+        return "ok"
+    message = payload["error"]
+    if isinstance(message, str) and message.startswith("Permission denied"):
+        return "denied"
+    return "error"
+
+
+def _annotate_tool(result, app_id=None):
+    """Tag the current span - datasette-agent's ``execute_tool`` span when it
+    has telemetry - with the app ID and how the tool ended. Returns
+    ``result`` unchanged."""
+    telemetry.annotate_current_span(
+        {
+            APP_ID: app_id if isinstance(app_id, str) and app_id else None,
+            TOOL_RESULT: _tool_result(result),
+        }
+    )
+    return result
+
+
 async def _app_create(
     datasette,
     actor,
@@ -238,7 +278,7 @@ async def _app_create(
     csp_origins=None,
 ):
     if not await _can_create_app(datasette, actor):
-        return _error("Permission denied: create-app")
+        return _annotate_tool(_error("Permission denied: create-app"))
     try:
         csp_origins = await resolve_csp_origins(datasette, actor, csp_origins or [])
         app = await Registry(datasette).create_stored_app(
@@ -252,8 +292,9 @@ async def _app_create(
             csp_origins=csp_origins or [],
         )
     except ValueError as e:
-        return _error(str(e))
-    return json.dumps(
+        return _annotate_tool(_error(str(e)))
+    telemetry.record_change("create", "agent")
+    result = json.dumps(
         {
             "app_id": app["id"],
             "name": app["name"],
@@ -269,15 +310,16 @@ async def _app_create(
             ),
         }
     )
+    return _annotate_tool(result, app["id"])
 
 
 async def _app_list(datasette, actor, query=None, limit=10):
     try:
         limit = int(limit)
     except (TypeError, ValueError):
-        return _error("limit must be an integer between 1 and 20")
+        return _annotate_tool(_error("limit must be an integer between 1 and 20"))
     if limit < 1 or limit > 20:
-        return _error("limit must be an integer between 1 and 20")
+        return _annotate_tool(_error("limit must be an integer between 1 and 20"))
 
     await Registry(datasette).ensure_tables()
     allowed_sql, allowed_params = await datasette.allowed_resources_sql(
@@ -299,13 +341,15 @@ async def _app_list(datasette, actor, query=None, limit=10):
     if query:
         fts_query = _fts_query(query)
         if not fts_query:
-            return json.dumps(
-                {
-                    "query": query,
-                    "apps": [],
-                    "returned_count": 0,
-                    "has_more": False,
-                }
+            return _annotate_tool(
+                json.dumps(
+                    {
+                        "query": query,
+                        "apps": [],
+                        "returned_count": 0,
+                        "has_more": False,
+                    }
+                )
             )
         join_search = "JOIN apps_fts ON apps.rowid = apps_fts.rowid"
         search_filter = "AND apps_fts MATCH :fts_query"
@@ -383,20 +427,45 @@ async def _app_list(datasette, actor, query=None, limit=10):
         }
         for row in rows[:limit]
     ]
-    return json.dumps(
-        {
-            "query": query,
-            "apps": apps,
-            "returned_count": len(apps),
-            "has_more": has_more,
-        }
+    return _annotate_tool(
+        json.dumps(
+            {
+                "query": query,
+                "apps": apps,
+                "returned_count": len(apps),
+                "has_more": has_more,
+            }
+        )
     )
+
+
+async def _existing_stored_app_id(datasette, app_id):
+    """``app_id`` if it names an existing, non-deleted stored app, else None.
+
+    ``app_id`` is model-supplied text, so it is only recorded on a span once
+    it is known to be a real app - the same rule as the app routes, which
+    tag the request span only after their 404 check.
+    """
+    if not isinstance(app_id, str) or not app_id:
+        return None
+    app = await Registry(datasette).get_app(app_id)
+    if app is None or app["external"]:
+        return None
+    return app_id
 
 
 async def _with_app_edit_permission(datasette, actor, app_id, callback):
     if not await _can_edit_app(datasette, actor, app_id):
-        return _error("Permission denied: edit-app", app_id=app_id)
-    return await callback()
+        result = _error("Permission denied: edit-app", app_id=app_id)
+    else:
+        result = await callback()
+    # EditToolset only succeeds after reading or editing the stored app, so
+    # an ok result proves the ID; anything else needs a lookup.
+    if _tool_result(result) == "ok":
+        known_app_id = app_id
+    else:
+        known_app_id = await _existing_stored_app_id(datasette, app_id)
+    return _annotate_tool(result, known_app_id)
 
 
 def _csp_origins_schema_description(datasette=None):
@@ -422,11 +491,82 @@ def _csp_origins_schema_description(datasette=None):
     )
 
 
+# apps.tool.result for each apps.debug.outcome: the debug machinery did its
+# job for ok, script_error and timed_out, even if the script itself failed.
+_DEBUG_TOOL_RESULTS = {
+    "ok": "ok",
+    "script_error": "ok",
+    "timed_out": "ok",
+    "denied": "denied",
+}
+
+
+def _debug_outcome(outcome, envelope):
+    """Classify a terminal app_debug run for ``apps.debug.outcome``.
+
+    Order matters: the harness's timeout envelope sets both ``ok: false``
+    and ``timed_out: true``, so ``timed_out`` is checked before ``ok``.
+    """
+    task_outcome = outcome.get("outcome")
+    if task_outcome == "expired":
+        return "task_expired"
+    if task_outcome == "cancelled":
+        return "task_cancelled"
+    if envelope["timed_out"]:
+        return "timed_out"
+    if envelope["ok"]:
+        return "ok"
+    return "script_error"
+
+
+def _seconds_since(iso_timestamp):
+    try:
+        started = datetime.fromisoformat(iso_timestamp)
+    except (TypeError, ValueError):
+        return None
+    return (datetime.now(timezone.utc) - started).total_seconds()
+
+
+async def _finish_debug(
+    datasette,
+    result,
+    outcome,
+    *,
+    app_id,
+    job=None,
+    run_seconds=None,
+    script_seconds=None,
+):
+    """Record one terminal app_debug execution and tag the current (tool)
+    span. Never called on the suspending first execution: that one exits
+    through the BrowserTaskPending raise. Returns ``result`` unchanged."""
+    outcome = telemetry.clamp(outcome, DEBUG_OUTCOME.values, None)
+    telemetry.record_debug_run(outcome, run_seconds, script_seconds)
+    if job is not None:
+        known_app_id = job["app_id"]
+    else:
+        known_app_id = await _existing_stored_app_id(datasette, app_id)
+    telemetry.annotate_current_span(
+        {
+            APP_ID: known_app_id,
+            DEBUG_JOB_ID: job["id"] if job is not None else None,
+            DEBUG_OUTCOME: outcome,
+            TOOL_RESULT: _DEBUG_TOOL_RESULTS.get(outcome, "error"),
+        }
+    )
+    return result
+
+
 async def _app_debug(
     datasette, actor, context, app_id, javascript, viewport=None, timeout_ms=None
 ):
     if not await _can_edit_app(datasette, actor, app_id):
-        return _error("Permission denied: edit-app", app_id=app_id)
+        return await _finish_debug(
+            datasette,
+            _error("Permission denied: edit-app", app_id=app_id),
+            "denied",
+            app_id=app_id,
+        )
     conversation_id = getattr(context, "conversation_id", None)
     call_key = getattr(context, "call_key", None)
     # Re-executing a suspended call (after its browser task finishes)
@@ -451,7 +591,9 @@ async def _app_debug(
                 call_key=call_key,
             )
         except ValueError as e:
-            return _error(str(e), app_id=app_id)
+            return await _finish_debug(
+                datasette, _error(str(e), app_id=app_id), "invalid", app_id=app_id
+            )
     app = await Registry(datasette).get_app(app_id)
     try:
         outcome = await context.browser_task(
@@ -466,10 +608,16 @@ async def _app_debug(
         # Matched by name so datasette-agent stays an optional dependency;
         # BrowserTaskPending (an llm.PauseChain) must keep propagating.
         if e.__class__.__name__ == "BrowserTasksNotSupported":
-            return _error(
-                "app_debug requires an interactive conversation with the "
-                "chat open in a browser; it is not available here",
+            return await _finish_debug(
+                datasette,
+                _error(
+                    "app_debug requires an interactive conversation with the "
+                    "chat open in a browser; it is not available here",
+                    app_id=app_id,
+                ),
+                "unsupported",
                 app_id=app_id,
+                job=job,
             )
         raise
     if not isinstance(outcome, dict):
@@ -477,6 +625,12 @@ async def _app_debug(
     envelope = normalize_envelope(outcome)
     # The audit record: what ran and what came back
     await complete_debug_job(datasette, job["id"], envelope)
+    # Wall-clock time the user waited, including the browser claiming the
+    # task; the script's own duration is browser-reported (normalize_envelope
+    # has coerced it to int or None).
+    run_seconds = _seconds_since(job["created_at"])
+    duration_ms = envelope["duration_ms"]
+    script_seconds = duration_ms / 1000 if duration_ms is not None else None
     payload = {
         "app_id": app_id,
         "version": job["version"],
@@ -485,7 +639,15 @@ async def _app_debug(
     payload.update(cap_envelope(envelope))
     if payload.get("error") is None:
         payload.pop("error", None)
-    return json.dumps(payload)
+    return await _finish_debug(
+        datasette,
+        json.dumps(payload),
+        _debug_outcome(outcome, envelope),
+        app_id=app_id,
+        job=job,
+        run_seconds=run_seconds,
+        script_seconds=script_seconds,
+    )
 
 
 def get_app_edit_tools(AgentTool, datasette=None):
