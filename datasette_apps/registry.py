@@ -4,6 +4,7 @@ import json
 import re
 from datetime import datetime, timezone
 
+from .acl import seed_owner_manager_grant, sync_general_access_grant
 from .db import ensure_tables
 from .ids import monotonic_ulid
 from .csp import normalize_connect_origin
@@ -382,6 +383,11 @@ class Registry:
             )
 
         await self.db.execute_write_fn(create)
+        await seed_owner_manager_grant(self.datasette, app_id, actor_id)
+        if not is_private:
+            await sync_general_access_grant(
+                self.datasette, app_id, is_private=False, by_actor=actor_id
+            )
         return await self.get_app(app_id)
 
     async def update_stored_app(
@@ -482,7 +488,7 @@ class Registry:
                 if current_csp_origins != csp_origins:
                     changes["csp_origins"] = csp_origins
             if not changes:
-                return
+                return changes
             if "sql_databases" in changes:
                 conn.execute(
                     "DELETE FROM app_sql_databases WHERE app_id = ?", (app_id,)
@@ -546,8 +552,16 @@ class Registry:
                         app_id,
                     ),
                 )
+            return changes
 
-        await self.db.execute_write_fn(save)
+        changes = await self.db.execute_write_fn(save)
+        if "is_private" in changes:
+            await sync_general_access_grant(
+                self.datasette,
+                app_id,
+                is_private=bool(changes["is_private"]),
+                by_actor=actor_id,
+            )
 
     async def edit_stored_app_html(self, app_id, transform, actor_id=None):
         """Atomically transform the current HTML for a stored app."""
@@ -1013,7 +1027,7 @@ class Registry:
             if row is None or row["deleted_at"] is not None:
                 raise KeyError(app_id)
             if row["is_private"] == is_private:
-                return
+                return False
             conn.execute(
                 """
                 UPDATE apps
@@ -1030,5 +1044,13 @@ class Registry:
                 now,
                 actor_id=actor_id,
             )
+            return True
 
-        await self.db.execute_write_fn(save)
+        changed = await self.db.execute_write_fn(save)
+        if changed:
+            await sync_general_access_grant(
+                self.datasette,
+                app_id,
+                is_private=mode == "private",
+                by_actor=actor_id,
+            )
