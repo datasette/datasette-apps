@@ -33,6 +33,8 @@ async def test_app_edit_agent_tools_are_registered():
         "app_edit",
         "app_render",
         "app_debug",
+        "app_add_stored_queries",
+        "app_remove_stored_queries",
     }
     assert tools["app_edit"].input_schema["required"] == ["app_id", "edits"]
     assert tools["app_list"].input_schema["properties"]["limit"] == {
