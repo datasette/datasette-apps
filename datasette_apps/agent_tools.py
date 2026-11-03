@@ -173,7 +173,7 @@ class StoredAppHtmlStore:
 
 def _app_widget_html(name, status, view_path, edit_path):
     name = html.escape(name)
-    view_path = html.escape(view_path, quote=True)
+    view_path = html.escape(f"{view_path}?full=1", quote=True)
     edit_path = html.escape(edit_path, quote=True)
     return (
         '<div class="datasette-app-agent-tool">'

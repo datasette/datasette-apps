@@ -256,7 +256,7 @@ async def test_app_create_agent_tool_creates_new_app():
     assert "url" not in result
     assert "edit_url" not in result
     assert (
-        f'class="datasette-app-button" href="/-/apps/{result["app_id"]}"'
+        f'class="datasette-app-button" href="/-/apps/{result["app_id"]}?full=1"'
         in result["_html"]
     )
     assert (
@@ -364,7 +364,7 @@ async def test_app_render_agent_tool_does_not_claim_update():
     assert "<strong>Signal desk</strong> v1." in result["_html"]
     assert "updated" not in result["_html"]
     assert (
-        f'class="datasette-app-button" href="/-/apps/{app["id"]}"'
+        f'class="datasette-app-button" href="/-/apps/{app["id"]}?full=1"'
         in result["_html"]
     )
 
@@ -401,7 +401,10 @@ async def test_app_edit_agent_tool_batches_edits_into_one_revision_and_renders()
     assert result["edits_applied"] == 2
     assert "url" not in result
     assert "edit_url" not in result
-    assert f'class="datasette-app-button" href="/-/apps/{app["id"]}"' in result["_html"]
+    assert (
+        f'class="datasette-app-button" href="/-/apps/{app["id"]}?full=1"'
+        in result["_html"]
+    )
     assert "<strong>Batch app</strong> updated to v2." in result["_html"]
 
     versions = await registry.list_versions(app["id"])
@@ -491,7 +494,7 @@ async def test_app_agent_tool_rendered_links_respect_base_url():
             html="<h1>Hello</h1>\n",
         )
     )
-    assert f'href="/prefix/-/apps/{created["app_id"]}"' in created["_html"]
+    assert f'href="/prefix/-/apps/{created["app_id"]}?full=1"' in created["_html"]
     assert f'href="/prefix/-/apps/{created["app_id"]}/edit"' in created["_html"]
 
     edited = json.loads(
@@ -508,7 +511,7 @@ async def test_app_agent_tool_rendered_links_respect_base_url():
             ],
         )
     )
-    assert f'href="/prefix/-/apps/{app["id"]}"' in edited["_html"]
+    assert f'href="/prefix/-/apps/{app["id"]}?full=1"' in edited["_html"]
     assert f'href="/prefix/-/apps/{app["id"]}/edit"' in edited["_html"]
 
 

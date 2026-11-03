@@ -124,7 +124,7 @@ async def test_context_is_none_for_forged_references(reference_type):
 def test_url_uses_launch_route_and_escapes_id(reference_type):
     datasette = Datasette(memory=True)
     ref = FakeReference(type="app", id="plugin:a/b", name="x")
-    assert reference_type.url(datasette, ref) == "/-/apps/plugin:a%2Fb/launch"
+    assert reference_type.url(datasette, ref) == "/-/apps/plugin:a%2Fb/launch?full=1"
 
 
 @pytest.mark.asyncio
@@ -150,7 +150,7 @@ async def test_registered_with_datasette_agent():
             "name": "Sales dashboard",
             "description": "Mine",
             "label": "app",
-            "url": f"/-/apps/{app_id}/launch",
+            "url": f"/-/apps/{app_id}/launch?full=1",
         }
     ]
     types = await get_reference_types(datasette)

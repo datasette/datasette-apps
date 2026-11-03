@@ -15,8 +15,9 @@ REFERENCE_INSTRUCTIONS = (
 
 def _app_reference_url(datasette, ref):
     # Has no database access, so it can't tell stored apps from external
-    # ones - the launch route redirects to the right place for both.
-    return datasette.urls.path(f"/-/apps/{quote(ref.id, safe=':')}/launch")
+    # ones - the launch route redirects to the right place for both, and
+    # forwards full=1 for stored apps only.
+    return datasette.urls.path(f"/-/apps/{quote(ref.id, safe=':')}/launch?full=1")
 
 
 async def _app_reference_context(datasette, actor, ref):

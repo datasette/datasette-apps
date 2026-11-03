@@ -37,6 +37,26 @@ async def test_apps_index_lists_apps_with_view_app_permission():
 
 
 @pytest.mark.asyncio
+async def test_launch_route_forwards_full_for_stored_apps():
+    datasette = Datasette(memory=True)
+    app = await Registry(datasette).create_stored_app(
+        actor_id="alice", name="Hello app", description="", html="<h1>Hi</h1>\n"
+    )
+
+    plain = await datasette.client.get(
+        f"/-/apps/{app['id']}/launch", actor={"id": "alice"}
+    )
+    assert plain.status_code == 302
+    assert plain.headers["location"] == f"/-/apps/{app['id']}"
+
+    full = await datasette.client.get(
+        f"/-/apps/{app['id']}/launch?full=1", actor={"id": "alice"}
+    )
+    assert full.status_code == 302
+    assert full.headers["location"] == f"/-/apps/{app['id']}?full=1"
+
+
+@pytest.mark.asyncio
 async def test_create_view_and_edit_stored_app():
     datasette = Datasette(
         memory=True,
