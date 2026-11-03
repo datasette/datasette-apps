@@ -16,14 +16,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "datasette-agent>=0.4a0",
+    "datasette-agent>=0.5a0",
     "playwright>=1.60.0",
     "pytest",
     "pytest-asyncio",
 ]
-
-[tool.uv.sources]
-datasette-agent = { path = "../datasette-agent", editable = true }
 
 [build-system]
 requires = ["setuptools"]
