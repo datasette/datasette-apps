@@ -22,6 +22,9 @@ dev = [
     "pytest-asyncio",
 ]
 
+[tool.uv.sources]
+datasette-agent = { path = "../datasette-agent", editable = true }
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"

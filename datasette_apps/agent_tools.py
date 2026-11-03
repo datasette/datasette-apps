@@ -271,42 +271,35 @@ async def _app_create(
     )
 
 
-async def _app_list(datasette, actor, query=None, limit=10):
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        return _error("limit must be an integer between 1 and 20")
-    if limit < 1 or limit > 20:
-        return _error("limit must be an integer between 1 and 20")
+async def search_allowed_apps(
+    datasette, actor, action, query=None, limit=10, stored_only=True
+):
+    """Apps the actor can perform action on, best matches first.
 
+    Filters on permissions in SQL so that limit applies to allowed apps. A
+    query with no searchable tokens matches nothing.
+    """
     await Registry(datasette).ensure_tables()
     allowed_sql, allowed_params = await datasette.allowed_resources_sql(
-        action="edit-app", actor=actor
+        action=action, actor=actor
     )
-    query = query.strip() if isinstance(query, str) else None
     actor_id = _actor_id(actor)
     params = dict(allowed_params)
     params.update(
         {
             "current_actor_id": actor_id,
-            "fetch_limit": limit + 1,
+            "limit": limit,
         }
     )
 
     join_search = ""
     search_filter = ""
     search_order = ""
+    stored_filter = "AND apps.external = 0" if stored_only else ""
     if query:
         fts_query = _fts_query(query)
         if not fts_query:
-            return json.dumps(
-                {
-                    "query": query,
-                    "apps": [],
-                    "returned_count": 0,
-                    "has_more": False,
-                }
-            )
+            return []
         join_search = "JOIN apps_fts ON apps.rowid = apps_fts.rowid"
         search_filter = "AND apps_fts MATCH :fts_query"
         search_order = """
@@ -325,7 +318,7 @@ async def _app_list(datasette, actor, query=None, limit=10):
             }
         )
 
-    rows = (
+    return (
         await datasette.get_internal_database().execute(
             """
             WITH allowed_apps AS (
@@ -353,7 +346,7 @@ async def _app_list(datasette, actor, query=None, limit=10):
               ON app_user_state.app_id = apps.id
              AND app_user_state.actor_id = :current_actor_id
             WHERE apps.deleted_at IS NULL
-              AND apps.external = 0
+              {stored_filter}
               {search_filter}
             ORDER BY
                 {search_order}
@@ -361,16 +354,31 @@ async def _app_list(datasette, actor, query=None, limit=10):
                 app_user_state.last_accessed_at DESC,
                 apps.updated_at DESC,
                 apps.id
-            LIMIT :fetch_limit
+            LIMIT :limit
             """.format(
                 allowed_sql=allowed_sql,
                 join_search=join_search,
+                stored_filter=stored_filter,
                 search_filter=search_filter,
                 search_order=search_order,
             ),
             params,
         )
     ).rows
+
+
+async def _app_list(datasette, actor, query=None, limit=10):
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return _error("limit must be an integer between 1 and 20")
+    if limit < 1 or limit > 20:
+        return _error("limit must be an integer between 1 and 20")
+
+    query = query.strip() if isinstance(query, str) else None
+    rows = await search_allowed_apps(
+        datasette, actor, "edit-app", query=query, limit=limit + 1
+    )
     has_more = len(rows) > limit
     apps = [
         {
