@@ -343,6 +343,33 @@ async def test_app_str_replace_agent_tool_edits_app_html_revision():
 
 
 @pytest.mark.asyncio
+async def test_app_render_agent_tool_does_not_claim_update():
+    datasette = Datasette(memory=True)
+    registry = Registry(datasette)
+    app = await registry.create_stored_app(
+        actor_id="alice",
+        name="Signal desk",
+        description="",
+        html="<h1>Hello</h1>\n",
+    )
+    await datasette.invoke_startup()
+    tools = _tools_by_name()
+
+    result = json.loads(
+        await tools["app_render"].fn(
+            datasette=datasette, actor={"id": "alice"}, app_id=app["id"]
+        )
+    )
+    assert result["status"] == "Rendered."
+    assert "<strong>Signal desk</strong> v1." in result["_html"]
+    assert "updated" not in result["_html"]
+    assert (
+        f'class="datasette-app-button" href="/-/apps/{app["id"]}"'
+        in result["_html"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_app_edit_agent_tool_batches_edits_into_one_revision_and_renders():
     datasette = Datasette(memory=True)
     registry = Registry(datasette)
@@ -375,7 +402,7 @@ async def test_app_edit_agent_tool_batches_edits_into_one_revision_and_renders()
     assert "url" not in result
     assert "edit_url" not in result
     assert f'class="datasette-app-button" href="/-/apps/{app["id"]}"' in result["_html"]
-    assert "Batch app" in result["_html"]
+    assert "<strong>Batch app</strong> updated to v2." in result["_html"]
 
     versions = await registry.list_versions(app["id"])
     assert [version["version"] for version in versions] == [2, 1]

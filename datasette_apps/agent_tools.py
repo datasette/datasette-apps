@@ -171,46 +171,61 @@ class StoredAppHtmlStore:
         raise NotImplementedError("Use the datasette-apps delete page to delete apps")
 
 
-def _render_app(editable):
-    metadata = editable.metadata
-    name = html.escape(metadata.get("name") or metadata["app_id"])
-    path = html.escape(metadata["path"], quote=True)
-    edit_path = html.escape(f"{metadata['path']}/edit", quote=True)
-    version = html.escape(str(editable.version))
-    return {
-        "_html": (
-            '<div class="datasette-app-agent-tool">'
-            '<span class="datasette-app-agent-tool-status">'
-            f"<strong>{name}</strong> updated to v{version}."
-            "</span>"
-            '<span class="datasette-app-agent-tool-actions">'
-            f'<a class="datasette-app-button" href="{path}">View app</a>'
-            f'<a class="datasette-app-button" href="{edit_path}">Edit</a>'
-            "</span>"
-            "</div>"
-        ),
-    }
-
-
-def _render_created_app(app, view_path, edit_path):
-    name = html.escape(app["name"] or app["id"])
-    path = html.escape(view_path, quote=True)
+def _app_widget_html(name, status, view_path, edit_path):
+    name = html.escape(name)
+    view_path = html.escape(view_path, quote=True)
     edit_path = html.escape(edit_path, quote=True)
     return (
         '<div class="datasette-app-agent-tool">'
         '<span class="datasette-app-agent-tool-status">'
-        f"<strong>{name}</strong> created."
+        f"<strong>{name}</strong>{status}"
         "</span>"
         '<span class="datasette-app-agent-tool-actions">'
-        f'<a class="datasette-app-button" href="{path}">View app</a>'
+        f'<a class="datasette-app-button" href="{view_path}">View app</a>'
         f'<a class="datasette-app-button" href="{edit_path}">Edit</a>'
         "</span>"
         "</div>"
     )
 
 
+def _render_app(editable, status=None):
+    metadata = editable.metadata
+    if status is None:
+        status = f" updated to v{html.escape(str(editable.version))}."
+    return {
+        "_html": _app_widget_html(
+            metadata.get("name") or metadata["app_id"],
+            status,
+            metadata["path"],
+            f"{metadata['path']}/edit",
+        ),
+    }
+
+
+def _render_app_unchanged(editable):
+    return _render_app(
+        editable, status=f" v{html.escape(str(editable.version))}."
+    )
+
+
+def _render_created_app(app, view_path, edit_path):
+    return _app_widget_html(app["name"] or app["id"], " created.", view_path, edit_path)
+
+
+class AppEditToolset(EditToolset):
+    """The render tool only displays the app, so its status must not claim
+    the app was updated."""
+
+    async def render(self, external_id):
+        self.render_hook = _render_app_unchanged
+        try:
+            return await super().render(external_id)
+        finally:
+            self.render_hook = _render_app
+
+
 def _toolset(datasette, actor):
-    return EditToolset(
+    return AppEditToolset(
         StoredAppHtmlStore(datasette, actor),
         name_prefix="app",
         id_field="app_id",
