@@ -653,6 +653,47 @@ async def unpin_app(datasette, request):
     return await _redirect_after_pin(request)
 
 
+class _InvalidQueryBody(Exception):
+    pass
+
+
+def _parse_query_body(raw):
+    """Parse an app query request body into (database, kind, name_or_sql,
+    params), where kind is "query" for a stored query or "sql"."""
+    try:
+        body = json.loads(raw.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise _InvalidQueryBody(str(e)) from e
+    if not isinstance(body, dict):
+        raise _InvalidQueryBody("body must be a JSON object")
+    kind = "query" if "query" in body else "sql"
+    for key in ("database", kind):
+        if key not in body:
+            raise _InvalidQueryBody(repr(key))
+        if not isinstance(body[key], str):
+            raise _InvalidQueryBody(f"{key!r} must be a string")
+    return body["database"], kind, body[kind], body.get("params")
+
+
+async def _run_query_body(datasette, request, app, actor):
+    try:
+        database, kind, value, params = _parse_query_body(await request.post_body())
+    except _InvalidQueryBody as e:
+        return Response.json({"ok": False, "error": f"Invalid request: {e}"})
+    try:
+        if kind == "query":
+            # Keep stored query execution server-side so permission revocations
+            # apply immediately to app pages that are already loaded in browsers.
+            result = await run_app_stored_query(
+                datasette, app, actor, database, value, params
+            )
+        else:
+            result = await run_app_query(datasette, app, actor, database, value, params)
+    except AppQueryError as e:
+        return Response.json({"ok": False, "error": str(e)})
+    return Response.json({"ok": True, "result": result})
+
+
 async def app_query(datasette, request):
     actor = request.actor
     app_id = request.url_vars["id"]
@@ -661,33 +702,7 @@ async def app_query(datasette, request):
     if app is None or app["external"]:
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
-    try:
-        body = json.loads((await request.post_body()).decode("utf-8") or "{}")
-        if "query" in body:
-            # Keep stored query execution server-side so permission revocations
-            # apply immediately to app pages that are already loaded in browsers.
-            result = await run_app_stored_query(
-                datasette,
-                app,
-                actor,
-                body["database"],
-                body["query"],
-                body.get("params"),
-            )
-        else:
-            result = await run_app_query(
-                datasette,
-                app,
-                actor,
-                body["database"],
-                body["sql"],
-                body.get("params"),
-            )
-        return Response.json({"ok": True, "result": result})
-    except (KeyError, json.JSONDecodeError) as e:
-        return Response.json({"ok": False, "error": f"Invalid request: {e}"})
-    except AppQueryError as e:
-        return Response.json({"ok": False, "error": str(e)})
+    return await _run_query_body(datasette, request, app, actor)
 
 
 async def _debug_job_or_404(datasette, request):
@@ -754,31 +769,7 @@ async def debug_query(datasette, request):
     app = await Registry(datasette).get_app(job["app_id"])
     if app is None:
         raise NotFound("App not found")
-    try:
-        body = json.loads((await request.post_body()).decode("utf-8") or "{}")
-        if "query" in body:
-            result = await run_app_stored_query(
-                datasette,
-                app,
-                request.actor,
-                body["database"],
-                body["query"],
-                body.get("params"),
-            )
-        else:
-            result = await run_app_query(
-                datasette,
-                app,
-                request.actor,
-                body["database"],
-                body["sql"],
-                body.get("params"),
-            )
-        return Response.json({"ok": True, "result": result})
-    except (KeyError, json.JSONDecodeError) as e:
-        return Response.json({"ok": False, "error": f"Invalid request: {e}"})
-    except AppQueryError as e:
-        return Response.json({"ok": False, "error": str(e)})
+    return await _run_query_body(datasette, request, app, request.actor)
 
 
 async def launch_app(datasette, request):
