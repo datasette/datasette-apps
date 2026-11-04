@@ -171,9 +171,13 @@ class StoredAppHtmlStore:
         raise NotImplementedError("Use the datasette-apps delete page to delete apps")
 
 
+def _full_view_path(path):
+    return f"{path}?full=1"
+
+
 def _app_widget_html(name, status, view_path, edit_path):
     name = html.escape(name)
-    view_path = html.escape(f"{view_path}?full=1", quote=True)
+    view_path = html.escape(_full_view_path(view_path), quote=True)
     edit_path = html.escape(edit_path, quote=True)
     return (
         '<div class="datasette-app-agent-tool">'
@@ -192,7 +196,10 @@ def _render_app(editable, status=None):
     metadata = editable.metadata
     if status is None:
         status = f" updated to v{html.escape(str(editable.version))}."
+    # path is model-visible (unlike _html) so the model links to the app
+    # with a real root-relative path instead of inventing a URL.
     return {
+        "path": _full_view_path(metadata["path"]),
         "_html": _app_widget_html(
             metadata.get("name") or metadata["app_id"],
             status,
@@ -268,18 +275,21 @@ async def _app_create(
         )
     except ValueError as e:
         return _error(str(e))
+    view_path = datasette.urls.path(app["path"])
     return json.dumps(
         {
             "app_id": app["id"],
             "name": app["name"],
             "version": app["current_version"],
+            "path": _full_view_path(view_path),
             "status": (
                 "Created app. The user can open it with the rendered View app "
-                "link above."
+                "link above. If you link to it in your reply, use exactly this "
+                "root-relative path as the link target."
             ),
             "_html": _render_created_app(
                 app,
-                datasette.urls.path(app["path"]),
+                view_path,
                 datasette.urls.path(f"{app['path']}/edit"),
             ),
         }

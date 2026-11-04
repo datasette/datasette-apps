@@ -250,9 +250,14 @@ async def test_app_create_agent_tool_creates_new_app():
         )
     )
     assert result["status"] == (
-        "Created app. The user can open it with the rendered View app link above."
+        "Created app. The user can open it with the rendered View app link "
+        "above. If you link to it in your reply, use exactly this "
+        "root-relative path as the link target."
     )
     assert result["app_id"]
+    # path is model-visible (not underscore-prefixed) so the model can link
+    # to the app without inventing a hostname
+    assert result["path"] == f"/-/apps/{result['app_id']}?full=1"
     assert "url" not in result
     assert "edit_url" not in result
     assert (
@@ -361,6 +366,7 @@ async def test_app_render_agent_tool_does_not_claim_update():
         )
     )
     assert result["status"] == "Rendered."
+    assert result["path"] == f"/-/apps/{app['id']}?full=1"
     assert "<strong>Signal desk</strong> v1." in result["_html"]
     assert "updated" not in result["_html"]
     assert (
@@ -617,3 +623,32 @@ def test_app_create_schema_mentions_permission_when_no_allowlist():
         "description"
     ]
     assert "apps-set-csp" in description
+
+
+@pytest.mark.asyncio
+async def test_app_tool_paths_respect_base_url():
+    datasette = Datasette(
+        memory=True,
+        settings={"base_url": "/prefix/"},
+        config={"permissions": {"create-app": {"id": "alice"}}},
+    )
+    await datasette.invoke_startup()
+    tools = _tools_by_name()
+
+    created = json.loads(
+        await tools["app_create"].fn(
+            datasette=datasette,
+            actor={"id": "alice"},
+            name="Prefixed",
+            html="<h1>Hi</h1>\n",
+        )
+    )
+    expected = f"/prefix/-/apps/{created['app_id']}?full=1"
+    assert created["path"] == expected
+
+    rendered = json.loads(
+        await tools["app_render"].fn(
+            datasette=datasette, actor={"id": "alice"}, app_id=created["app_id"]
+        )
+    )
+    assert rendered["path"] == expected
