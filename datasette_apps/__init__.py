@@ -124,3 +124,12 @@ def register_agent_tools(datasette):
     from .agent_tools import get_app_edit_tools
 
     return get_app_edit_tools(AgentTool, datasette)
+
+
+@hookimpl(optionalhook=True)
+def register_agent_reference_types(datasette):
+    from datasette_agent.references import Reference, ReferenceType
+
+    from .agent_references import get_app_reference_types
+
+    return get_app_reference_types(ReferenceType, Reference)

@@ -8,15 +8,15 @@ license = "Apache-2.0"
 classifiers=[
     "Framework :: Datasette"
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "datasette>=1.0a37",
+    "datasette>=1.0a41",
     "datasette-agent-edit>=0.1a0",
 ]
 
 [dependency-groups]
 dev = [
-    "datasette-agent>=0.4a0",
+    "datasette-agent>=0.5a0",
     "playwright>=1.60.0",
     "pytest",
     "pytest-asyncio",

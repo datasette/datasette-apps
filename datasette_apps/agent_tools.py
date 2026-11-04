@@ -188,38 +188,17 @@ class StoredAppHtmlStore:
         raise NotImplementedError("Use the datasette-apps delete page to delete apps")
 
 
-def _render_app(editable):
-    metadata = editable.metadata
-    name = html.escape(metadata.get("name") or metadata["app_id"])
-    path = html.escape(metadata["path"], quote=True)
-    edit_path = html.escape(f"{metadata['path']}/edit", quote=True)
-    version = html.escape(str(editable.version))
-    return {
-        "_html": (
-            '<div class="datasette-app-agent-tool">'
-            '<span class="datasette-app-agent-tool-status">'
-            f"<strong>{name}</strong> updated to v{version}."
-            "</span>"
-            '<span class="datasette-app-agent-tool-actions">'
-            f'<a class="datasette-app-button" href="{path}">View app</a>'
-            f'<a class="datasette-app-button" href="{edit_path}">Edit</a>'
-            "</span>"
-            "</div>"
-        ),
-    }
-
-
-def _render_created_app(app, view_path, edit_path):
-    name = html.escape(app["name"] or app["id"])
-    path = html.escape(view_path, quote=True)
+def _app_widget_html(name, status, view_path, edit_path):
+    name = html.escape(name)
+    view_path = html.escape(f"{view_path}?full=1", quote=True)
     edit_path = html.escape(edit_path, quote=True)
     return (
         '<div class="datasette-app-agent-tool">'
         '<span class="datasette-app-agent-tool-status">'
-        f"<strong>{name}</strong> created."
+        f"<strong>{name}</strong>{status}"
         "</span>"
         '<span class="datasette-app-agent-tool-actions">'
-        f'<a class="datasette-app-button" href="{path}">View app</a>'
+        f'<a class="datasette-app-button" href="{view_path}">View app</a>'
         f'<a class="datasette-app-button" href="{edit_path}">Edit</a>'
         "</span>"
         "</div>"
@@ -362,8 +341,44 @@ async def _approve_write_queries(context, app_name, queries):
     return None
 
 
+def _render_app(editable, status=None):
+    metadata = editable.metadata
+    if status is None:
+        status = f" updated to v{html.escape(str(editable.version))}."
+    return {
+        "_html": _app_widget_html(
+            metadata.get("name") or metadata["app_id"],
+            status,
+            metadata["path"],
+            f"{metadata['path']}/edit",
+        ),
+    }
+
+
+def _render_app_unchanged(editable):
+    return _render_app(
+        editable, status=f" v{html.escape(str(editable.version))}."
+    )
+
+
+def _render_created_app(app, view_path, edit_path):
+    return _app_widget_html(app["name"] or app["id"], " created.", view_path, edit_path)
+
+
+class AppEditToolset(EditToolset):
+    """The render tool only displays the app, so its status must not claim
+    the app was updated."""
+
+    async def render(self, external_id):
+        self.render_hook = _render_app_unchanged
+        try:
+            return await super().render(external_id)
+        finally:
+            self.render_hook = _render_app
+
+
 def _toolset(datasette, actor):
-    return EditToolset(
+    return AppEditToolset(
         StoredAppHtmlStore(datasette, actor),
         name_prefix="app",
         id_field="app_id",
@@ -433,42 +448,35 @@ async def _app_create(
     )
 
 
-async def _app_list(datasette, actor, query=None, limit=10):
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        return _error("limit must be an integer between 1 and 20")
-    if limit < 1 or limit > 20:
-        return _error("limit must be an integer between 1 and 20")
+async def search_allowed_apps(
+    datasette, actor, action, query=None, limit=10, stored_only=True
+):
+    """Apps the actor can perform action on, best matches first.
 
+    Filters on permissions in SQL so that limit applies to allowed apps. A
+    query with no searchable tokens matches nothing.
+    """
     await Registry(datasette).ensure_tables()
     allowed_sql, allowed_params = await datasette.allowed_resources_sql(
-        action="edit-app", actor=actor
+        action=action, actor=actor
     )
-    query = query.strip() if isinstance(query, str) else None
     actor_id = _actor_id(actor)
     params = dict(allowed_params)
     params.update(
         {
             "current_actor_id": actor_id,
-            "fetch_limit": limit + 1,
+            "limit": limit,
         }
     )
 
     join_search = ""
     search_filter = ""
     search_order = ""
+    stored_filter = "AND apps.external = 0" if stored_only else ""
     if query:
         fts_query = _fts_query(query)
         if not fts_query:
-            return json.dumps(
-                {
-                    "query": query,
-                    "apps": [],
-                    "returned_count": 0,
-                    "has_more": False,
-                }
-            )
+            return []
         join_search = "JOIN apps_fts ON apps.rowid = apps_fts.rowid"
         search_filter = "AND apps_fts MATCH :fts_query"
         search_order = """
@@ -487,7 +495,7 @@ async def _app_list(datasette, actor, query=None, limit=10):
             }
         )
 
-    rows = (
+    return (
         await datasette.get_internal_database().execute(
             """
             WITH allowed_apps AS (
@@ -515,7 +523,7 @@ async def _app_list(datasette, actor, query=None, limit=10):
               ON app_user_state.app_id = apps.id
              AND app_user_state.actor_id = :current_actor_id
             WHERE apps.deleted_at IS NULL
-              AND apps.external = 0
+              {stored_filter}
               {search_filter}
             ORDER BY
                 {search_order}
@@ -523,16 +531,31 @@ async def _app_list(datasette, actor, query=None, limit=10):
                 app_user_state.last_accessed_at DESC,
                 apps.updated_at DESC,
                 apps.id
-            LIMIT :fetch_limit
+            LIMIT :limit
             """.format(
                 allowed_sql=allowed_sql,
                 join_search=join_search,
+                stored_filter=stored_filter,
                 search_filter=search_filter,
                 search_order=search_order,
             ),
             params,
         )
     ).rows
+
+
+async def _app_list(datasette, actor, query=None, limit=10):
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return _error("limit must be an integer between 1 and 20")
+    if limit < 1 or limit > 20:
+        return _error("limit must be an integer between 1 and 20")
+
+    query = query.strip() if isinstance(query, str) else None
+    rows = await search_allowed_apps(
+        datasette, actor, "edit-app", query=query, limit=limit + 1
+    )
     has_more = len(rows) > limit
     apps = [
         {

@@ -790,7 +790,10 @@ async def launch_app(datasette, request):
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     if not app["external"]:
-        return Response.redirect(app["path"])
+        path = app["path"]
+        if request.args.get("full") == "1":
+            path = f"{path}?full=1"
+        return Response.redirect(path)
     if actor:
         await registry.record_access(_actor_id(actor), app_id)
     return Response.redirect(app["path"])
