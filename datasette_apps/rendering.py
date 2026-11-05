@@ -367,7 +367,7 @@ def iframe_bridge_script(channel_token=None, debug=False):
     if (event.message && !details.message) {
       details.message = String(event.message);
     }
-    if (!event.error && /^Script error\.?$/.test(details.message || "")) {
+    if (!event.error && /^Script error\\.?$/.test(details.message || "")) {
       // WebKit withholds uncaught-error details in sandboxed (opaque
       // origin) frames. Annotate so readers know why, and which
       // channels still carry full details.
