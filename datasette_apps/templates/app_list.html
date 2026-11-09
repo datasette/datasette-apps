@@ -3,18 +3,20 @@
 {% block title %}Apps{% endblock %}
 
 {% block content %}
+<main class="datasette-apps-index">
 <div class="datasette-apps-page-header">
   <h1>Apps</h1>
   {% if can_create %}
-    <p><a class="datasette-app-button" href="{{ urls.path('/-/apps/create') }}">Create app</a></p>
+    <a class="datasette-apps-create-button" href="{{ urls.path('/-/apps/create') }}">Create app</a>
   {% endif %}
 </div>
 
-<form class="datasette-apps-search" method="get" action="{{ urls.path('/-/apps') }}">
-  <input type="search" name="q" placeholder="Search apps" value="{{ q or '' }}">
+<form class="datasette-apps-search" method="get" action="{{ urls.path('/-/apps') }}" role="search">
+  <input type="search" name="q" placeholder="Search apps" aria-label="Search apps" value="{{ q or '' }}">
   <button type="submit">Search</button>
 </form>
 
+{% if apps %}
 <ul class="datasette-app-list">
 {% for app in apps %}
   <li class="datasette-app-list-item{% if app.pinned %} datasette-app-list-item-pinned{% endif %}">
@@ -43,8 +45,20 @@
   </li>
 {% endfor %}
 </ul>
-
-{% if next_url %}
-  <p><a rel="next" href="{{ urls.path(next_url) }}">Next</a></p>
+{% elif page > 1 %}
+<p class="datasette-apps-empty">No apps on this page.</p>
+{% elif q %}
+<p class="datasette-apps-empty">No apps match “{{ q }}”.</p>
+{% else %}
+<p class="datasette-apps-empty">No apps yet.</p>
 {% endif %}
+
+{% if prev_url or next_url %}
+<nav class="datasette-apps-pagination" aria-label="App pages">
+  {% if prev_url %}<a rel="prev" href="{{ urls.path(prev_url) }}">Previous</a>{% else %}<span aria-disabled="true">Previous</span>{% endif %}
+  <span>Page {{ page }}</span>
+  {% if next_url %}<a rel="next" href="{{ urls.path(next_url) }}">Next</a>{% else %}<span aria-disabled="true">Next</span>{% endif %}
+</nav>
+{% endif %}
+</main>
 {% endblock %}

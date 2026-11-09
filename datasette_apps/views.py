@@ -329,6 +329,15 @@ async def _redirect_after_pin(request):
     return Response.redirect("/-/apps")
 
 
+def _apps_index_url(offset, q):
+    params = {}
+    if offset:
+        params["next"] = offset
+    if q:
+        params["q"] = q
+    return "/-/apps" + ("?" + urlencode(params) if params else "")
+
+
 async def apps_index(datasette, request):
     actor = request.actor
     registry = Registry(datasette)
@@ -352,19 +361,17 @@ async def apps_index(datasette, request):
         app["href"] = _app_link(app)
         app["pinned"] = bool(app.get("pinned_at"))
         visible_apps.append(app)
-    next_url = None
-    if has_next:
-        next_offset = offset + page_size
-        params = {"next": next_offset}
-        if request.args.get("q"):
-            params["q"] = request.args.get("q")
-        next_url = "/-/apps?" + urlencode(params)
+    q = request.args.get("q")
+    next_url = _apps_index_url(offset + page_size, q) if has_next else None
+    prev_url = _apps_index_url(max(offset - page_size, 0), q) if offset > 0 else None
     return Response.html(
         await datasette.render_template(
             "app_list.html",
             {
                 "apps": visible_apps,
-                "q": request.args.get("q"),
+                "q": q,
+                "page": offset // page_size + 1,
+                "prev_url": prev_url,
                 "next_url": next_url,
                 "current_path": request.full_path,
                 "can_create": await datasette.allowed(

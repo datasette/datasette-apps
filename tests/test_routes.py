@@ -33,7 +33,7 @@ async def test_apps_index_lists_apps_with_view_app_permission():
     assert response.status_code == 200
     assert "Plugin One" in response.text
     assert "/-/apps/plugin:one/launch" in response.text
-    assert 'class="datasette-app-button" href="/-/apps/create"' in response.text
+    assert 'class="datasette-apps-create-button" href="/-/apps/create"' in response.text
 
 
 @pytest.mark.asyncio
