@@ -138,9 +138,14 @@ _DEBUG_BRIDGE_EXTENSIONS = """
 """
 
 
-def iframe_bridge_script(channel_token=None, debug=False):
+def iframe_bridge_script(channel_token=None, debug=False, context=None):
+    """context is a small JSON object describing where the app is being
+    shown - exposed to the app as datasette.context. Panels pinned to a
+    page receive {"target": "table", "database": ..., "table": ...}."""
     if channel_token is None:
         channel_token = "datasette-apps-test-channel"
+    if context is None:
+        context = {"target": "app"}
     script = """<script id="datasette-apps-bridge">
 (function() {
   var nextId = 1;
@@ -532,6 +537,19 @@ __DEBUG_EXTENSIONS__
         {database: database, query: query, params: params},
         "datasette-stored-query-error"
       );
+    },
+    // Where this app is being shown: {target: "app"} on its own page, or
+    // {target: "homepage" | "database" | "table", database, table, panel}
+    // when pinned to the top of a Datasette page as a panel.
+    context: __CONTEXT__,
+    // Ask the host page for a different frame height, in CSS pixels. Only
+    // honored for pinned panels, where the host clamps it to a sane range.
+    resize: function(height) {
+      height = Math.round(Number(height));
+      if (!isFinite(height) || height <= 0) {
+        return;
+      }
+      postToParent({type: "datasette-app-resize", height: height});
     }
   };
   window.datasette = datasetteApi;
@@ -549,14 +567,28 @@ __DEBUG_EXTENSIONS__
   }
 })();
 </script>"""
-    return script.replace(
-        "__DEBUG_EXTENSIONS__", _DEBUG_BRIDGE_EXTENSIONS if debug else ""
-    ).replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
+    return (
+        script.replace(
+            "__DEBUG_EXTENSIONS__", _DEBUG_BRIDGE_EXTENSIONS if debug else ""
+        )
+        .replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
+        .replace("__CONTEXT__", _json_script_string(context))
+    )
+
+
+PANEL_MIN_HEIGHT = 40
+PANEL_MAX_HEIGHT = 1200
 
 
 def parent_bridge_script(
-    app_id, iframe_id="datasette-app-frame", channel_token=None, mirror_viewport=False
+    app_id,
+    iframe_id="datasette-app-frame",
+    channel_token=None,
+    mirror_viewport=False,
+    panel=False,
 ):
+    """panel=True is the compact host used for apps pinned to the top of
+    other pages: no log panel, and the app may ask to be resized."""
     if channel_token is None:
         channel_token = "datasette-apps-test-channel"
     query_endpoint = f"/-/apps/{app_id}/query"
@@ -564,6 +596,7 @@ def parent_bridge_script(
 (function() {
   var channelToken = __CHANNEL_TOKEN__;
   var mirrorViewport = __MIRROR_VIEWPORT__;
+  var panelMode = __PANEL_MODE__;
   var bridgePort = null;
   var channelEstablished = false;
   var errors = [];
@@ -778,6 +811,9 @@ def parent_bridge_script(
   }
 
   function addAppLog(log) {
+    if (panelMode) {
+      return;
+    }
     logs.push(log || {});
     logs = logs.slice(-100);
     renderLogs();
@@ -913,6 +949,15 @@ def parent_bridge_script(
       mirrorViewportMeta(message.content || "");
       return;
     }
+    if (message.type === "datasette-app-resize") {
+      var height = Math.round(Number(message.height));
+      var frame = getIframe();
+      if (panelMode && frame && isFinite(height)) {
+        height = Math.max(__PANEL_MIN_HEIGHT__, Math.min(__PANEL_MAX_HEIGHT__, height));
+        frame.style.height = height + "px";
+      }
+      return;
+    }
     if (
       message.type !== "datasette-app-query" &&
       message.type !== "datasette-app-stored-query"
@@ -975,6 +1020,9 @@ def parent_bridge_script(
         .replace("__QUERY_ENDPOINT__", _json_script_string(query_endpoint))
         .replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
         .replace("__MIRROR_VIEWPORT__", json.dumps(bool(mirror_viewport)))
+        .replace("__PANEL_MODE__", json.dumps(bool(panel)))
+        .replace("__PANEL_MIN_HEIGHT__", str(PANEL_MIN_HEIGHT))
+        .replace("__PANEL_MAX_HEIGHT__", str(PANEL_MAX_HEIGHT))
     )
 
 

@@ -23,6 +23,23 @@ from .debug import (
     expire_debug_job,
     get_debug_job,
 )
+from .panel_kit import (
+    PANEL_WIDTHS,
+    TEMPLATES,
+    get_panel_template,
+    render_panel_template,
+    suggest_panel_config,
+)
+from .panels import (
+    PanelError,
+    add_panel_path,
+    can_share_panels,
+    can_view_target,
+    create_panel,
+    normalize_target,
+    target_label,
+    target_path,
+)
 from .permissions import AppResource, AppsResource
 from .prompt import build_llm_prompt_data, stored_query_options
 from .rendering import build_app_srcdoc, iframe_bridge_script, parent_bridge_script
@@ -384,6 +401,88 @@ async def apps_index(datasette, request):
     )
 
 
+async def _create_template_context(datasette, request, actor):
+    """Template gallery plus the optional "pin it here afterwards" target
+    for the create page, driven by ?template= and ?panel_target= etc."""
+    args = request.args
+    panel_target = None
+    panel_database = args.get("panel_database") or ""
+    panel_table = args.get("panel_table") or ""
+    if args.get("panel_target"):
+        try:
+            candidate = normalize_target(
+                args.get("panel_target"), panel_database, panel_table
+            )
+        except PanelError:
+            candidate = None
+        if candidate and await can_view_target(datasette, actor, *candidate):
+            panel_target, panel_database, panel_table = candidate
+    template = get_panel_template(args.get("template") or "")
+    selected_databases = set()
+    initial_html = ""
+    initial_name = ""
+    if template is not None:
+        database = panel_database
+        if not database:
+            visible = await _visible_database_names(datasette, actor)
+            database = visible[0] if visible else ""
+        config = await suggest_panel_config(
+            datasette, template.id, database or None, panel_table or None
+        )
+        initial_name = (
+            config.get("label") or template.config.get("label") or (template.name)
+        )
+        initial_html = render_panel_template(template.id, config, title=initial_name)
+        if database:
+            selected_databases.add(database)
+    passthrough = {
+        key: value
+        for key, value in (
+            ("panel_target", panel_target),
+            ("panel_database", panel_database if panel_target else ""),
+            ("panel_table", panel_table if panel_target else ""),
+        )
+        if value
+    }
+    create_path = datasette.urls.path("/-/apps/create")
+
+    def gallery_href(template_id=None):
+        params = dict(passthrough)
+        if template_id:
+            params = {"template": template_id, **params}
+        return create_path + ("?" + urlencode(params) if params else "")
+
+    return {
+        "sql_database_options": await _visible_database_options(
+            datasette, actor, selected_databases
+        ),
+        "panel_templates": [
+            {
+                "template": item,
+                "href": gallery_href(item.id),
+                "selected": template is not None and item.id == template.id,
+            }
+            for item in TEMPLATES
+        ],
+        "blank_template_href": gallery_href(),
+        "selected_template": template,
+        "initial_html": initial_html,
+        "initial_name": initial_name,
+        "panel_target": panel_target,
+        "panel_database": panel_database if panel_target else "",
+        "panel_table": panel_table if panel_target else "",
+        "panel_target_label": (
+            target_label(panel_target, panel_database, panel_table)
+            if panel_target
+            else ""
+        ),
+        "panel_widths": PANEL_WIDTHS,
+        "panel_default_width": template.width if template else 6,
+        "panel_default_height": template.height if template else 240,
+        "can_share_panels": await can_share_panels(datasette, actor),
+    }
+
+
 async def create_app(datasette, request):
     actor = _require_actor(request)
     if not await datasette.allowed(
@@ -396,9 +495,6 @@ async def create_app(datasette, request):
                 "app_create.html",
                 {
                     "llm_prompt_data": await build_llm_prompt_data(datasette, actor),
-                    "sql_database_options": await _visible_database_options(
-                        datasette, actor
-                    ),
                     "stored_query_options": [],
                     "query_search_url": datasette.urls.path("/-/queries.json"),
                     "recent_query_url": datasette.urls.path(
@@ -406,6 +502,7 @@ async def create_app(datasette, request):
                     ),
                     "codemirror_assets": _codemirror_assets(),
                     **(await _csp_form_context(datasette, actor)),
+                    **(await _create_template_context(datasette, request, actor)),
                 },
                 request=request,
             )
@@ -434,6 +531,32 @@ async def create_app(datasette, request):
         stored_queries=stored_queries,
         csp_origins=csp_origins,
     )
+    panel_target = post.get("panel_target")
+    if panel_target:
+        # "Create and pin": the new app goes straight onto the chosen page
+        try:
+            panel = await create_panel(
+                datasette,
+                actor,
+                app["id"],
+                panel_target,
+                post.get("panel_database"),
+                post.get("panel_table"),
+                width=post.get("panel_width"),
+                height=post.get("panel_height"),
+                is_shared=post.get("panel_is_shared") == "1",
+            )
+        except PanelError:
+            # The app itself was created fine, so show it rather than an error
+            return Response.redirect(app["path"])
+        return Response.redirect(
+            target_path(
+                datasette,
+                panel["target_type"],
+                panel["database_name"],
+                panel["table_name"],
+            )
+        )
     return Response.redirect(app["path"])
 
 
@@ -473,6 +596,7 @@ async def view_app(datasette, request):
                 "current_path": request.path,
                 "can_edit": can_edit,
                 "can_pin": bool(actor),
+                "add_panel_path": add_panel_path(datasette, "", app_id=app_id),
             },
             request=request,
         ),

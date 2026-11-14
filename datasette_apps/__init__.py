@@ -2,6 +2,14 @@ from datasette import hookimpl
 from datasette.jump import JumpSQL
 
 from .csp import configured_csp_allowlist
+from .panels import (
+    add_panel,
+    edit_panel,
+    frame_csp_asgi_wrapper,
+    panel_action_links,
+    panel_templates_json,
+    render_panels,
+)
 from .permissions import app_permission_sql, register_app_actions
 from .registry import Registry
 from .views import (
@@ -31,6 +39,9 @@ def register_routes():
         (r"^/-/apps$", apps_index),
         (r"^/-/apps/create$", create_app),
         (r"^/-/apps/recent-queries\.json$", recent_stored_queries),
+        (r"^/-/apps/templates\.json$", panel_templates_json),
+        (r"^/-/apps/panels/add$", add_panel),
+        (r"^/-/apps/panels/(?P<panel_id>\d+)$", edit_panel),
         (r"^/-/apps/debug/(?P<job_id>[^/]+)/frame$", debug_frame),
         (r"^/-/apps/debug/(?P<job_id>[^/]+)/query$", debug_query),
         (r"^/-/apps/(?P<id>[^/]+)\.json$", app_json),
@@ -101,8 +112,43 @@ async def startup(datasette):
 
 
 @hookimpl
+def asgi_wrapper(datasette):
+    return frame_csp_asgi_wrapper
+
+
+@hookimpl
 def top_homepage(datasette, request):
-    return top_homepage_html(datasette, request)
+    async def inner():
+        return await render_panels(
+            datasette, request, "homepage"
+        ) + await top_homepage_html(datasette, request)
+
+    return inner
+
+
+@hookimpl
+def top_database(datasette, request, database):
+    return render_panels(datasette, request, "database", database)
+
+
+@hookimpl
+def top_table(datasette, request, database, table):
+    return render_panels(datasette, request, "table", database, table)
+
+
+@hookimpl
+def homepage_actions(datasette, actor, request):
+    return panel_action_links(datasette, actor, "homepage")
+
+
+@hookimpl
+def database_actions(datasette, actor, database, request):
+    return panel_action_links(datasette, actor, "database", database)
+
+
+@hookimpl
+def table_actions(datasette, actor, database, table, request):
+    return panel_action_links(datasette, actor, "table", database, table)
 
 
 @hookimpl

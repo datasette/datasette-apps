@@ -103,6 +103,34 @@ CREATE TABLE IF NOT EXISTS app_csp_origins (
 CREATE INDEX IF NOT EXISTS idx_app_csp_origins_app
     ON app_csp_origins(app_id, directive);
 
+-- An app pinned as a framed panel at the top of the homepage, a database
+-- page or a table page. Personal panels (is_shared = 0) are only shown to
+-- the actor who placed them; shared panels are shown to everyone who can
+-- view the app.
+CREATE TABLE IF NOT EXISTS app_panels (
+    id INTEGER PRIMARY KEY,
+    app_id TEXT NOT NULL REFERENCES apps(id),
+    target_type TEXT NOT NULL,
+    database_name TEXT NOT NULL DEFAULT '',
+    table_name TEXT NOT NULL DEFAULT '',
+    actor_id TEXT,
+    is_shared INTEGER NOT NULL DEFAULT 0,
+    width INTEGER NOT NULL DEFAULT 12,
+    height INTEGER NOT NULL DEFAULT 240,
+    show_header INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (target_type IN ('homepage', 'database', 'table')),
+    CHECK (is_shared IN (0, 1)),
+    CHECK (show_header IN (0, 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_panels_target
+    ON app_panels(target_type, database_name, table_name, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_app_panels_app ON app_panels(app_id);
+
 CREATE TABLE IF NOT EXISTS _app_debug_jobs (
     id TEXT PRIMARY KEY,
     actor_id TEXT NOT NULL,

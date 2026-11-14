@@ -1,0 +1,34 @@
+.pk-stat-row { flex-direction: row; gap: 0; align-items: stretch; }
+.pk-stat-row .pk-tile {
+  border-left: 1px solid var(--pk-line);
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 16px;
+}
+.pk-stat-row .pk-tile:first-child { border-left: 0; padding-left: 0; }
+.pk-stat-row .pk-value { font-size: clamp(20px, 26vh, 40px); overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 520px) {
+  .pk-stat-row { flex-wrap: wrap; row-gap: 10px; }
+  .pk-stat-row .pk-tile { border-left: 0; flex-basis: 50%; padding: 0 8px 0 0; }
+}
+/* ==== JS ==== */
+Panel.run({
+  load: () => Panel.query(CONFIG.sql),
+  draw(rows, root) {
+    if (!rows.length) return false;
+    // Either one row whose columns are the tiles, or rows of (label, value)
+    const tiles = "label" in rows[0] && "value" in rows[0]
+      ? rows.map(row => [row.label, row.value])
+      : Object.entries(rows[0]);
+    for (const [label, value] of tiles.slice(0, 6)) {
+      const formatted = Panel.number(value);
+      root.append(Panel.el("div", {class: "pk-tile"},
+        Panel.el("div", {class: "pk-label", text: label}),
+        Panel.el("div", {class: "pk-value", text: formatted, title: formatted})));
+    }
+  }
+});

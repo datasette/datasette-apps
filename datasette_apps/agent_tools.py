@@ -17,6 +17,24 @@ from .debug import (
     get_debug_job_for_call,
     normalize_envelope,
 )
+from .panel_kit import (
+    PANEL_WIDTH_VALUES,
+    TEMPLATES,
+    UnknownPanelTemplate,
+    get_panel_template,
+    merged_panel_config,
+    render_panel_template,
+    template_of_html,
+)
+from .panels import (
+    PanelError,
+    can_manage_panel,
+    create_panel,
+    delete_panel,
+    get_panel,
+    target_label,
+    target_path,
+)
 from .permissions import AppResource, AppsResource
 from .registry import Registry, _fts_query
 
@@ -45,8 +63,39 @@ APP_TOOL_DESCRIPTIONS = {
     ),
     "create": (
         "Create a new stored Datasette HTML app. Use this when the user asks "
-        "you to build a new app and you do not already have an app_id."
+        "you to build a new app and you do not already have an app_id. For "
+        "a small dashboard-style panel - a headline number, KPI row, "
+        "sparkline, chart, list or note - pass template and template_config "
+        "instead of html: call app_panel_templates first to see the "
+        "templates. Templates give every panel the same look, so prefer them "
+        "over hand-written HTML for anything that will be pinned to a page."
         + APP_RUNTIME_API_GUIDANCE
+    ),
+    "panel_templates": (
+        "List the panel templates available to app_create. Each template is "
+        "a small, consistently styled dashboard panel driven by one SQL "
+        "query. The result gives, per template: what the SQL must return, "
+        "the template_config keys with their meaning and defaults, and the "
+        "default panel size. Typical flow: explore the data, write the SQL "
+        "so its columns match the template's sql_shape, call app_create with "
+        "template and template_config, then app_pin_panel to place it."
+    ),
+    "pin_panel": (
+        "Pin a stored Datasette app as a framed panel at the top of a page: "
+        "the homepage, a database page or a table page. Use this after "
+        "creating an app from a panel template, or when the user asks to "
+        "put an app or chart on a page. width is a column span on a 12 "
+        "column grid (12 full width, 8 two thirds, 6 half, 4 one third, 3 "
+        "one quarter) and height is in pixels; both default to the app's "
+        "template size. Several panels on one page flow left to right, so "
+        "four width-3 stat tiles make a row. The panel is only visible to "
+        "the current user unless shared is true, which needs the "
+        "apps-share-panels permission. Inside a pinned app, "
+        "datasette.context gives {target, database, table}."
+    ),
+    "unpin_panel": (
+        "Remove a panel from the page it is pinned to, by panel_id. The "
+        "app itself is not deleted."
     ),
     "view": (
         "View the current HTML source for a stored Datasette app, with "
@@ -363,9 +412,7 @@ def _render_app(editable, status=None):
 
 
 def _render_app_unchanged(editable):
-    return _render_app(
-        editable, status=f" v{html.escape(str(editable.version))}."
-    )
+    return _render_app(editable, status=f" v{html.escape(str(editable.version))}.")
 
 
 def _render_created_app(app, view_path, edit_path):
@@ -401,20 +448,104 @@ def _error(message, app_id=None):
     return json.dumps(payload)
 
 
+async def _app_panel_templates(datasette, actor):
+    return json.dumps({"templates": [template.as_dict() for template in TEMPLATES]})
+
+
+async def _app_pin_panel(
+    datasette,
+    actor,
+    app_id,
+    target,
+    database=None,
+    table=None,
+    width=None,
+    height=None,
+    shared=False,
+):
+    if width is None or height is None:
+        version = await Registry(datasette).get_current_version(app_id)
+        template = template_of_html(version["html"]) if version else None
+        if template is not None:
+            width = template.width if width is None else width
+            height = template.height if height is None else height
+    try:
+        panel = await create_panel(
+            datasette,
+            actor,
+            app_id,
+            target,
+            database,
+            table,
+            width=width,
+            height=height,
+            is_shared=bool(shared),
+        )
+    except PanelError as e:
+        return _error(str(e), app_id)
+    label = target_label(
+        panel["target_type"], panel["database_name"], panel["table_name"]
+    )
+    return json.dumps(
+        {
+            "panel_id": panel["id"],
+            "app_id": app_id,
+            "width": panel["width"],
+            "height": panel["height"],
+            "shared": bool(panel["is_shared"]),
+            "path": target_path(
+                datasette,
+                panel["target_type"],
+                panel["database_name"],
+                panel["table_name"],
+            ),
+            "status": (
+                f"Pinned to {label}. If you link to that page in your reply, "
+                "use exactly this root-relative path as the link target."
+            ),
+        }
+    )
+
+
+async def _app_unpin_panel(datasette, actor, panel_id):
+    panel = await get_panel(datasette, panel_id)
+    if panel is None or not await can_manage_panel(datasette, actor, panel):
+        return _error(f"Panel {panel_id} not found")
+    await delete_panel(datasette, panel_id)
+    return json.dumps({"panel_id": panel_id, "status": "Panel removed"})
+
+
 async def _app_create(
     datasette,
     actor,
     name,
-    html,
+    html=None,
     description="",
     is_private=True,
     sql_databases=None,
     stored_queries=None,
     csp_origins=None,
+    template=None,
+    template_config=None,
     context=None,
 ):
     if not await _can_create_app(datasette, actor):
         return _error("Permission denied: create-app")
+    panel_template = None
+    if template:
+        try:
+            config = merged_panel_config(template, template_config)
+            html = render_panel_template(template, template_config, title=name)
+        except UnknownPanelTemplate as e:
+            return _error(str(e))
+        panel_template = get_panel_template(template)
+        # The panel can only query databases on the app's allow-list
+        if config.get("database"):
+            sql_databases = list(sql_databases or [])
+            if config["database"] not in sql_databases:
+                sql_databases.append(config["database"])
+    elif not html:
+        return _error("Provide either html or template")
     try:
         csp_origins = await resolve_csp_origins(datasette, actor, csp_origins or [])
         queries = await _resolve_stored_queries(datasette, actor, stored_queries)
@@ -448,6 +579,16 @@ async def _app_create(
                 "Created app. The user can open it with the rendered View app "
                 "link above. If you link to it in your reply, use exactly this "
                 "root-relative path as the link target."
+                + (
+                    " Built from the {} panel template: use app_pin_panel to "
+                    "pin it to a page (default size width {}, height {}). To "
+                    "change it later, edit the CONFIG block near the top of "
+                    "its HTML.".format(
+                        panel_template.id, panel_template.width, panel_template.height
+                    )
+                    if panel_template
+                    else ""
+                )
             ),
             "_html": _render_created_app(
                 app,
@@ -823,7 +964,28 @@ def get_app_edit_tools(AgentTool, datasette=None):
                     },
                     "html": {
                         "type": "string",
-                        "description": "Complete HTML source for the new app",
+                        "description": (
+                            "Complete HTML source for the new app. Omit when "
+                            "using template"
+                        ),
+                    },
+                    "template": {
+                        "type": "string",
+                        "description": (
+                            "Build the app from this panel template instead "
+                            "of html. See app_panel_templates"
+                        ),
+                        "enum": [template.id for template in TEMPLATES],
+                    },
+                    "template_config": {
+                        "type": "object",
+                        "description": (
+                            "Settings for the template, for example "
+                            '{"label": "Open issues", "database": "github", '
+                            '"sql": "select count(*) as value from issues '
+                            "where state = 'open'\"}. Unset keys keep the "
+                            "template defaults"
+                        ),
                     },
                     "is_private": {
                         "type": "boolean",
@@ -852,9 +1014,74 @@ def get_app_edit_tools(AgentTool, datasette=None):
                         "items": {"type": "string"},
                     },
                 },
-                "required": ["name", "html"],
+                "required": ["name"],
             },
             fn=_app_create,
+        ),
+        AgentTool(
+            name="app_panel_templates",
+            description=APP_TOOL_DESCRIPTIONS["panel_templates"],
+            input_schema={"type": "object", "properties": {}},
+            fn=_app_panel_templates,
+        ),
+        AgentTool(
+            name="app_pin_panel",
+            description=APP_TOOL_DESCRIPTIONS["pin_panel"],
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "app_id": {
+                        "type": "string",
+                        "description": "The stored Datasette app ID",
+                    },
+                    "target": {
+                        "type": "string",
+                        "enum": ["homepage", "database", "table"],
+                        "description": "The kind of page to pin to",
+                    },
+                    "database": {
+                        "type": "string",
+                        "description": "Database name, for database and table targets",
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "Table name, for table targets",
+                    },
+                    "width": {
+                        "type": "integer",
+                        "enum": PANEL_WIDTH_VALUES,
+                        "description": "Column span out of 12",
+                    },
+                    "height": {
+                        "type": "integer",
+                        "description": "Frame height in pixels",
+                    },
+                    "shared": {
+                        "type": "boolean",
+                        "description": (
+                            "Show the panel to everyone who can view the app; "
+                            "defaults to false"
+                        ),
+                    },
+                },
+                "required": ["app_id", "target"],
+            },
+            fn=_app_pin_panel,
+        ),
+        AgentTool(
+            name="app_unpin_panel",
+            description=APP_TOOL_DESCRIPTIONS["unpin_panel"],
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "panel_id": {
+                        "type": "integer",
+                        "description": "The panel ID returned by app_pin_panel",
+                    },
+                },
+                "required": ["panel_id"],
+            },
+            fn=_app_unpin_panel,
         ),
         AgentTool(
             name="app_view",

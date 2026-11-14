@@ -30,6 +30,7 @@ This plugin allows you to create and modify HTML apps, and provides a plugin hoo
 - `/-/apps/ULID` to interact with a full screen HTML app
 - `/-/apps/create` for creating a new app
 - `/-/apps/ULID/edit` to edit an existing app
+- `/-/apps/panels/add` to pin an app to the top of a page - see [Panels](#panels-apps-pinned-to-pages-experimental)
 
 Signed-in users get an "Apps" link in Datasette's top-right menu.
 
@@ -73,7 +74,7 @@ Stored query access is configured using a picker on the create and edit pages. T
 
 ### Permissions
 
-The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, `delete-app`, `manage-app-access`, and `apps-set-csp`. Stored app owners can always view, edit, delete, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
+The plugin registers Datasette permissions for `create-app`, `view-app`, `edit-app`, `delete-app`, `manage-app-access`, `apps-set-csp`, and `apps-share-panels`. Stored app owners can always view, edit, delete, and manage their own apps. Apps marked private are visible only to their owner, even if other users have broad `view-app` permission grants.
 
 Creating stored apps requires an explicit `create-app` permission grant. To grant that to all signed-in users:
 
@@ -106,6 +107,62 @@ External apps registered by plugins are not private by default, so they also req
 Signed-in users can pin apps from the catalog and from individual stored app pages. Pinned apps appear first on `/-/apps`, and the three most recently used pinned apps are shown on the Datasette homepage using `top_homepage()`.
 
 The `/-/apps` catalog is searchable and paginated.
+
+### Panels: apps pinned to pages (experimental)
+
+A stored app can be pinned as a **panel**: a framed, sized copy of the app shown at the top of the homepage, a database page or a table page. A small app - a headline number, a sparkline, a chart - becomes a dashboard tile for the data it describes.
+
+To add one, use **Add app panel** in the homepage, database or table actions menu, or **Pin to a page** on an app's own page. Each panel has:
+
+- a **width**, as a span on a 12 column grid: full, two thirds, half, one third or one quarter. Panels on the same page flow left to right and wrap, so four quarter-width tiles make a row. On narrow screens they stack.
+- a **height** in pixels, from 40 to 1200.
+- a position, and whether the app name is shown above the frame.
+
+Hover a panel for its **Open** and **Settings** links; settings is where a panel is resized, reordered or removed.
+
+Panels are personal by default: only the user who pinned one sees it. Users with the `apps-share-panels` permission can mark a panel as shared, which shows it to everyone who can view the app (a private app stays visible only to its owner):
+
+```yaml
+permissions:
+  apps-share-panels:
+    id: admin
+```
+
+A panel is the same sandboxed iframe as the full app page, with the same CSP and the same data access rules: queries run as the person viewing the page, against the app's allow-listed databases. Pages that show panels are served with `Content-Security-Policy: frame-src 'none'`, as the app page is, so a panel cannot navigate its own frame to another site.
+
+Inside a pinned app, `datasette.context` describes where it is running - `{target: "table", database: "shop", table: "orders", panel: {width, height}}`, or `{target: "app"}` on the app's own page - and `datasette.resize(height)` asks the host page for a different frame height.
+
+#### Panel templates
+
+The create page offers a gallery of **panel templates**, so that panels made by different people (and by agents) look like one family:
+
+| Template | Shows | The query returns |
+|---|---|---|
+| `stat` | One headline number, with an optional change | one row: `value`, optional `previous` |
+| `stat-row` | A strip of up to six numbers | one row of named columns, or rows of `label`, `value` |
+| `sparkline` | A number above a sparkline | rows of `x`, `value`, oldest first |
+| `timeseries` | A line chart with gridlines and a hover readout | rows of `x`, `value`, oldest first |
+| `bars` | Ranked horizontal bars | rows of `label`, `value` |
+| `recent` | A compact list of the latest rows | rows of `title`, optional `subtitle`, `meta` |
+| `meter` | Progress towards a goal | one row: `value`, optional `goal` |
+| `calendar` | A heatmap of activity by day | rows of `day`, `value` |
+| `note` | A text callout | no query |
+
+Each template is an ordinary self-contained app. It starts with a `CONFIG` block - label, database, SQL, number format - which is the only part that normally needs editing, followed by a shared "panel kit" of styles and helpers that is identical in every template. Writing `{{table}}` in the SQL means "the table this panel is pinned to", so one app can be pinned to several tables.
+
+Starting a template from a table's **Add app panel** page pre-fills the query from that table's columns (a date-like column to trend over, a low-cardinality text column to group by) and pins the new app back to the table when it is created.
+
+`/-/apps/templates.json` lists the templates and their settings.
+
+If [datasette-agent](https://github.com/datasette/datasette-agent) is installed the agent gets matching tools: `app_panel_templates` lists the templates, `app_create` accepts `template` and `template_config` in place of `html`, and `app_pin_panel` / `app_unpin_panel` place and remove panels. Asking "put a chart of orders per month at the top of the orders table" then costs the agent one SQL query and a few settings rather than a page of HTML.
+
+To try all of this against sample data:
+
+```bash
+uv run python demo/panels_demo.py /tmp/panels-demo
+uv run datasette /tmp/panels-demo/shop.db --internal /tmp/panels-demo/internal.db \
+    -c /tmp/panels-demo/datasette.yaml --root
+```
 
 ### App authoring
 

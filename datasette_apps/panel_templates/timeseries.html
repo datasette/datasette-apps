@@ -1,0 +1,18 @@
+.pk-timeseries .pk-head { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+/* ==== JS ==== */
+Panel.run({
+  load: () => Panel.query(CONFIG.sql),
+  draw(rows, root) {
+    if (!rows.length) return false;
+    const points = rows.map(row => ({x: row.x, value: Number(row.value) || 0}));
+    const total = points.reduce((sum, point) => sum + point.value, 0);
+    const chart = Panel.el("div", {class: "pk-grow"});
+    Panel.put(
+      Panel.el("div", {class: "pk-head"},
+        Panel.el("div", {class: "pk-label", text: CONFIG.label}),
+        Panel.el("div", {class: "pk-caption", text: Panel.number(total) + " total"})),
+      chart
+    );
+    Panel.lineChart(chart, points, {axes: true, label: CONFIG.label});
+  }
+});

@@ -1131,3 +1131,87 @@ throw new Error("render exploded");
             or (error.get("sanitized") and "details withheld" in error["message"])
             for error in js_errors
         )
+
+
+def test_template_panels_render_and_resize_on_a_table_page(tmp_path):
+    from datasette_apps.panel_kit import render_panel_template
+    from datasette_apps.panels import create_panel
+
+    db_path = tmp_path / "shop.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "create table orders (id integer primary key, status text);"
+        "insert into orders (status) values ('a'), ('a'), ('b');"
+    )
+    conn.close()
+    server = DatasetteServer(tmp_path, files=[db_path])
+
+    async def seed():
+        datasette = Datasette(
+            [str(db_path)],
+            internal=str(server.internal_db_path),
+            config={
+                "permissions": {
+                    "view-app": True,
+                    "apps-share-panels": {"id": "alice"},
+                }
+            },
+        )
+        await datasette.invoke_startup()
+        registry = Registry(datasette)
+        apps = {
+            # {{table}} resolves to the table the panel is pinned to
+            "stat": {"label": "Rows", "sql": "select count(*) as value from {{table}}"},
+            "bars": {
+                "label": "By status",
+                "sql": "select status as label, count(*) as value from orders group by 1",
+            },
+            "note": {"label": "About", "text": "One\n\nTwo\n\nThree\n\nFour\n\nFive"},
+        }
+        for template, config in apps.items():
+            app = await registry.create_stored_app(
+                actor_id="alice",
+                name=template,
+                description="",
+                html=render_panel_template(template, config),
+                is_private=False,
+                sql_databases=["shop"],
+            )
+            await create_panel(
+                datasette,
+                {"id": "alice"},
+                app["id"],
+                "table",
+                "shop",
+                "orders",
+                width=4,
+                height=60 if template == "note" else 140,
+                is_shared=True,
+            )
+        datasette.close()
+
+    asyncio.run(seed())
+
+    with server, sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{server.url}/shop/orders")
+        frames = page.locator("iframe.datasette-app-panel-frame")
+        assert frames.count() == 3
+        stat = page.frame_locator("iframe.datasette-app-panel-frame >> nth=0")
+        stat.locator(".pk-value").wait_for()
+        assert stat.locator(".pk-value").inner_text() == "3"
+        assert stat.locator(".pk-label").inner_text() == "Rows"
+        bars = page.frame_locator("iframe.datasette-app-panel-frame >> nth=1")
+        bars.locator(".pk-bar").first.wait_for()
+        assert bars.locator(".pk-name").all_inner_texts() == ["a", "b"]
+        # The note asked the host for more room than its 60px frame
+        page.wait_for_function(
+            "document.querySelectorAll('iframe.datasette-app-panel-frame')[2]"
+            ".offsetHeight > 100"
+        )
+        assert frames.nth(0).evaluate("frame => frame.offsetHeight") == 140
+        # Panels are compact: no log panel, and nothing went wrong
+        assert page.locator(".datasette-app-log-panel").count() == 0
+        assert page.locator(".datasette-app-error-panel:not([hidden])").count() == 0
+        browser.close()

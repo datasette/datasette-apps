@@ -1,0 +1,48 @@
+.pk-note { border-left: 3px solid var(--pk-accent); gap: 6px; height: auto; margin: var(--pk-pad) 0 var(--pk-pad) calc(var(--pk-pad) + 2px); padding: 2px 14px; }
+.pk-note.pk-tone-plain { border-left-color: var(--pk-line); }
+.pk-note.pk-tone-warning { border-left-color: var(--pk-warn); }
+.pk-note .pk-heading { font-size: 14px; font-weight: 600; }
+.pk-note p, .pk-note ul { color: var(--pk-ink-2); font-size: 13.5px; margin: 0; }
+.pk-note ul { padding-left: 18px; }
+.pk-note code { background: var(--pk-track); border-radius: 3px; font-size: 12.5px; padding: 1px 4px; }
+/* ==== JS ==== */
+(() => {
+  // A deliberately tiny formatter: blank-line paragraphs, "- " lists,
+  // **bold** and `code`. Everything is inserted as text, never as HTML.
+  function inline(parent, text) {
+    for (const part of text.split(/(\*\*[^*]+\*\*|`[^`]+`)/)) {
+      if (part.startsWith("**") && part.length > 4) parent.append(Panel.el("strong", {text: part.slice(2, -2)}));
+      else if (part.startsWith("`") && part.length > 2) parent.append(Panel.el("code", {text: part.slice(1, -1)}));
+      else if (part) parent.append(part);
+    }
+  }
+  const root = Panel.root;
+  root.classList.add("pk-tone-" + (CONFIG.tone || "info"));
+  if (CONFIG.label) {
+    root.append(Panel.el("div", {class: "pk-heading",
+      text: (CONFIG.tone === "warning" ? "⚠ " : "") + CONFIG.label}));
+  }
+  for (const block of String(CONFIG.text || "").split(/\n\s*\n/)) {
+    const lines = block.split("\n").map(line => line.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    if (lines.every(line => line.startsWith("- "))) {
+      const list = Panel.el("ul");
+      for (const line of lines) {
+        const item = Panel.el("li");
+        inline(item, line.slice(2));
+        list.append(item);
+      }
+      root.append(list);
+    } else {
+      const paragraph = Panel.el("p");
+      inline(paragraph, lines.join(" "));
+      root.append(paragraph);
+    }
+  }
+  // Grow or shrink the frame to fit the text when pinned as a panel
+  if (CONFIG.fit_height !== false && window.datasette && datasette.resize) {
+    const fit = () => datasette.resize(root.offsetHeight + 24);
+    fit();
+    addEventListener("resize", fit);
+  }
+})();

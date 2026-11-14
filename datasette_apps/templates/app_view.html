@@ -28,7 +28,10 @@
         </form>
       {% endif %}
     </div>
-    <div class="datasette-app-secondary-actions">
+    <div class="datasette-app-secondary-actions datasette-app-actions">
+      {% if can_pin %}
+      <a class="datasette-app-button datasette-app-add-panel-button" href="{{ add_panel_path }}">Pin to a page</a>
+      {% endif %}
       <a class="datasette-app-button datasette-app-fullscreen-button" href="{{ urls.path('/-/apps/' ~ app.id) }}?full=1">Full screen</a>
     </div>
   </div>

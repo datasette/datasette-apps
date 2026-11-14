@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Add app panel{% endblock %}
+
+{% block crumbs %}
+{% import "_app_crumbs.html" as app_crumbs with context %}
+{{ app_crumbs.nav(request=request) }}
+{% endblock %}
+
+{% block content %}
+{% import "_panel_gallery.html" as panel_gallery %}
+<main class="datasette-apps-index datasette-app-panel-admin">
+<h1>Add app panel</h1>
+<p>
+  {% if target_known %}
+    Pin an app in a frame at the top of <a href="{{ target_path }}">{{ target_label }}</a>.
+  {% else %}
+    Pin an app in a frame at the top of the homepage, a database page or a table page.
+  {% endif %}
+</p>
+
+{% if can_create and target_known %}
+<section aria-labelledby="panel-template-heading">
+  <h2 id="panel-template-heading">Create a new panel from a template</h2>
+  <div class="datasette-app-template-gallery">
+    {{ panel_gallery.cards(templates) }}
+  </div>
+</section>
+{% endif %}
+
+<section aria-labelledby="panel-existing-heading">
+  <h2 id="panel-existing-heading">Pin an existing app</h2>
+  {% if apps %}
+  <form class="datasette-app-form datasette-app-panel-form" method="post" action="{{ urls.path('/-/apps/panels/add') }}">
+    <div class="datasette-app-form-row">
+      <label for="panel-app">App</label>
+      <select id="panel-app" name="app_id">
+        {% for app in apps %}
+        <option value="{{ app.id }}"{% if app.id == selected_app %} selected{% endif %}>{{ app.name }}{% if app.is_private %} (private){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="datasette-app-form-row">
+      <label for="panel-target">Page</label>
+      <select id="panel-target" name="target">
+        {% for group, options in target_options|groupby("group") %}
+          {% if group %}<optgroup label="{{ group }}">{% endif %}
+          {% for option in options %}
+          <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+          {% if group %}</optgroup>{% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <div class="datasette-app-form-row">
+      {{ panel_gallery.size_fields(widths, default_width, default_height, "width", "height", min_height, max_height) }}
+    </div>
+    <div class="datasette-app-form-row">
+      <label for="panel-show-header">App name above the panel</label>
+      <select id="panel-show-header" name="show_header">
+        <option value="">Automatic (hidden for template panels, which have their own label)</option>
+        <option value="1">Show</option>
+        <option value="0">Hide</option>
+      </select>
+    </div>
+    {% if can_share %}
+    <div class="datasette-app-form-row">
+      <label><input type="checkbox" name="is_shared" value="1"> Show this panel to everyone who can view the app</label>
+      <p class="datasette-app-form-help">Private apps stay visible only to their owner.</p>
+    </div>
+    {% else %}
+    <p class="datasette-app-form-help">Only you will see this panel.</p>
+    {% endif %}
+    <div class="datasette-app-form-actions">
+      <button type="submit">Pin panel</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="datasette-apps-empty">You do not have any apps to pin yet.</p>
+  {% endif %}
+</section>
+</main>
+{% endblock %}

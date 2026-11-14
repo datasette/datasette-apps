@@ -1,0 +1,70 @@
+.pk-calendar .pk-head { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+.pk-calendar .pk-legend { align-items: center; color: var(--pk-ink-3); display: flex; font-size: 11px; gap: 3px; }
+.pk-calendar .pk-legend i { border-radius: 2px; display: inline-block; height: 10px; width: 10px; }
+/* ==== JS ==== */
+(() => {
+  // One hue, light to dark: more activity is darker. Step 0 is "nothing".
+  const RAMP = ["#efeeeb", "#b7d3f6", "#6da7ec", "#2a78d6", "#184f95"];
+  const DAY = 86400000;
+  const iso = time => new Date(time).toISOString().slice(0, 10);
+
+  Panel.run({
+    load: () => Panel.query(CONFIG.sql),
+    draw(rows, root) {
+      const counts = new Map();
+      for (const row of rows) {
+        const day = String(row.day || "").slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(day)) counts.set(day, (counts.get(day) || 0) + (Number(row.value) || 0));
+      }
+      if (!counts.size) return false;
+      const days = [...counts.keys()].sort();
+      // End on the latest day that has data, so historical tables still fill the grid
+      const end = Date.parse((CONFIG.end === "today" ? iso(Date.now()) : days[days.length - 1]) + "T00:00:00Z");
+      const peak = Math.max(...counts.values());
+      const level = value => !value ? 0 : Math.min(4, 1 + Math.floor(3.999 * (value - 1) / Math.max(1, peak - 1)));
+
+      const holder = Panel.el("div", {class: "pk-grow"});
+      Panel.put(
+        Panel.el("div", {class: "pk-head"},
+          Panel.el("div", {class: "pk-label", text: CONFIG.label}),
+          Panel.el("div", {class: "pk-legend"}, "Less",
+            RAMP.map(color => Panel.el("i", {style: "background:" + color})), "More")),
+        holder);
+
+      const width = holder.clientWidth;
+      const height = holder.clientHeight;
+      const gap = 2;
+      const top = 14;
+      const cell = Math.max(5, Math.min(16, Math.floor((height - top) / 7) - gap));
+      const weeks = Math.max(4, Math.min(53, Math.floor((width + gap) / (cell + gap))));
+      const endWeekday = new Date(end).getUTCDay();
+      const start = end - ((weeks - 1) * 7 + endWeekday) * DAY;
+      const chart = Panel.svg("svg", {class: "pk-chart", width: width, height: top + 7 * (cell + gap),
+        role: "img", "aria-label": CONFIG.label || "Activity by day"});
+      let lastMonth = -1;
+      let lastLabelX = -100;
+      for (let week = 0; week < weeks; week += 1) {
+        for (let weekday = 0; weekday < 7; weekday += 1) {
+          const time = start + (week * 7 + weekday) * DAY;
+          if (time > end) continue;
+          const key = iso(time);
+          const value = counts.get(key) || 0;
+          const x = week * (cell + gap);
+          const rect = Panel.svg("rect", {x: x, y: top + weekday * (cell + gap), width: cell, height: cell, rx: 2,
+            fill: RAMP[level(value)]});
+          Panel.hover(rect, Panel.date(key), Panel.number(value, {full: true}));
+          chart.append(rect);
+          const month = new Date(time).getUTCMonth();
+          if (weekday === 0 && month !== lastMonth) {
+            if (x - lastLabelX > 30 && x < width - 24) {
+              chart.append(Panel.svg("text", {x: x, y: 9, text: Panel.date(key.slice(0, 7)).slice(0, 3)}));
+              lastLabelX = x;
+            }
+            lastMonth = month;
+          }
+        }
+      }
+      holder.append(chart);
+    }
+  });
+})();

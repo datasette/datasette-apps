@@ -1,0 +1,32 @@
+.pk-meter { justify-content: center; }
+.pk-meter .pk-head { align-items: baseline; display: flex; gap: 8px; }
+.pk-meter .pk-value { font-size: clamp(22px, 26vh, 44px); }
+.pk-meter .pk-track {
+  background: var(--pk-accent-soft);
+  border-radius: 4px;
+  height: 8px;
+  margin: 6px 0 2px;
+  overflow: hidden;
+}
+.pk-meter .pk-fill { background: var(--pk-accent); border-radius: 4px; height: 100%; }
+/* ==== JS ==== */
+Panel.run({
+  load: async () => (await Panel.query(CONFIG.sql))[0],
+  draw(row, root) {
+    if (!row) return false;
+    const value = Number("value" in row ? row.value : Object.values(row)[0]) || 0;
+    const goal = Number(row.goal !== undefined && row.goal !== null ? row.goal : CONFIG.goal) || 0;
+    const share = goal > 0 ? value / goal : 0;
+    const percent = Math.round(share * 100) + "%";
+    Panel.put(
+      Panel.el("div", {class: "pk-label", text: CONFIG.label}),
+      Panel.el("div", {class: "pk-head"},
+        Panel.el("div", {class: "pk-value", text: Panel.number(value)}),
+        Panel.el("div", {class: "pk-caption", text: "of " + Panel.number(goal)})),
+      Panel.el("div", {class: "pk-track", role: "progressbar", "aria-valuemin": 0,
+          "aria-valuemax": goal, "aria-valuenow": value, "aria-label": CONFIG.label},
+        Panel.el("div", {class: "pk-fill", style: "width: " + Math.min(100, share * 100).toFixed(1) + "%"})),
+      Panel.el("div", {class: "pk-caption", text: percent + (CONFIG.caption ? " · " + CONFIG.caption : "")})
+    );
+  }
+});

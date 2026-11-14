@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Panel settings: {{ app.name }}{% endblock %}
+
+{% block crumbs %}
+{% import "_app_crumbs.html" as app_crumbs with context %}
+{{ app_crumbs.nav(request=request, app=app) }}
+{% endblock %}
+
+{% block content %}
+{% import "_panel_gallery.html" as panel_gallery %}
+<main class="datasette-apps-index datasette-app-panel-admin">
+<h1>Panel settings</h1>
+<p>
+  <a href="{{ urls.path(app.path) }}">{{ app.name }}</a> is pinned to
+  <a href="{{ target_path }}">{{ target_label }}</a>.
+</p>
+
+<form class="datasette-app-form datasette-app-panel-form" method="post">
+  <div class="datasette-app-form-row">
+    {{ panel_gallery.size_fields(widths, panel.width, panel.height, "width", "height", min_height, max_height) }}
+  </div>
+  <div class="datasette-app-form-row">
+    <label for="panel-sort-order">Position</label>
+    <input id="panel-sort-order" type="number" name="sort_order" value="{{ panel.sort_order }}" step="1">
+    <p class="datasette-app-form-help">Panels are laid out left to right, lowest number first.</p>
+  </div>
+  <div class="datasette-app-form-row">
+    <label><input type="checkbox" name="show_header" value="1"{% if panel.show_header %} checked{% endif %}> Show the app name above the panel</label>
+  </div>
+  {% if can_share %}
+  <div class="datasette-app-form-row">
+    <label><input type="checkbox" name="is_shared" value="1"{% if panel.is_shared %} checked{% endif %}> Show this panel to everyone who can view the app</label>
+  </div>
+  {% endif %}
+  <div class="datasette-app-form-actions">
+    <button type="submit">Save panel</button>
+  </div>
+</form>
+
+<form class="datasette-app-form" method="post">
+  <input type="hidden" name="remove" value="1">
+  <button type="submit" class="datasette-app-panel-remove">Remove panel</button>
+  <p class="datasette-app-form-help">This unpins the panel. The app itself is not deleted.</p>
+</form>
+</main>
+{% endblock %}

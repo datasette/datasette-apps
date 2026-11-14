@@ -59,6 +59,11 @@ def register_app_actions():
             description="Set arbitrary CSP origins on Datasette apps",
             resource_class=AppsResource,
         ),
+        Action(
+            name="apps-share-panels",
+            description="Pin app panels to pages for every user, not just yourself",
+            resource_class=AppsResource,
+        ),
     ]
 
 

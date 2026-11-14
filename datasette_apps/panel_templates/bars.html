@@ -1,0 +1,45 @@
+.pk-bars .pk-rows {
+  align-content: start;
+  column-gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(60px, max-content) 1fr;
+  overflow-y: auto;
+  row-gap: 6px;
+}
+.pk-bars .pk-name {
+  color: var(--pk-ink-2);
+  font-size: 12.5px;
+  max-width: 38vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pk-bars .pk-bar-cell { align-items: center; display: flex; gap: 6px; min-width: 0; }
+.pk-bars .pk-bar {
+  background: var(--pk-accent);
+  border-radius: 0 4px 4px 0;
+  flex: 0 0 auto;
+  height: 14px;
+  min-width: 2px;
+}
+.pk-bars .pk-num { color: var(--pk-ink); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* ==== JS ==== */
+Panel.run({
+  load: () => Panel.query(CONFIG.sql),
+  draw(rows, root) {
+    if (!rows.length) return false;
+    const peak = Math.max(...rows.map(row => Number(row.value) || 0), 0) || 1;
+    const list = Panel.el("div", {class: "pk-rows pk-grow"});
+    for (const row of rows) {
+      const value = Number(row.value) || 0;
+      const name = row.label === null || row.label === "" ? "(blank)" : String(row.label);
+      const cell = Panel.el("div", {class: "pk-bar-cell"},
+        // The value label sits outside the bar end, so leave room for it
+        Panel.el("div", {class: "pk-bar", style: "width: calc((100% - 56px) * " + (value / peak).toFixed(4) + ")"}),
+        Panel.el("div", {class: "pk-num", text: Panel.number(value)}));
+      Panel.hover(cell, name, Panel.number(value, {full: true}));
+      list.append(Panel.el("div", {class: "pk-name", text: name, title: name}), cell);
+    }
+    Panel.put(Panel.el("div", {class: "pk-label", text: CONFIG.label}), list);
+  }
+});

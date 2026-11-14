@@ -41,7 +41,7 @@ asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.setuptools.package-data]
-datasette_apps = ["static/*", "templates/*"]
+datasette_apps = ["static/*", "templates/*", "panel_templates/*"]
 
 [tool.setuptools.packages.find]
 include = ["datasette_apps"]

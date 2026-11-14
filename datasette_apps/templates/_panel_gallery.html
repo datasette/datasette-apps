@@ -1,0 +1,24 @@
+{% macro cards(templates) -%}
+{% for item in templates %}
+<a class="datasette-app-template-card{% if item.selected %} datasette-app-template-card-selected{% endif %}" href="{{ item.href }}" data-template-id="{{ item.template.id }}"{% if item.selected %} aria-current="true"{% endif %}>
+  <span class="datasette-app-template-thumb">{{ item.template.thumbnail|safe }}</span>
+  <strong>{{ item.template.name }}</strong>
+  <span>{{ item.template.description }}</span>
+</a>
+{% endfor %}
+{%- endmacro %}
+
+{% macro size_fields(widths, width, height, width_name="width", height_name="height", min_height=40, max_height=1200) -%}
+<div class="datasette-app-panel-size-fields">
+  <label>Width
+    <select name="{{ width_name }}">
+      {% for value, label in widths %}
+      <option value="{{ value }}"{% if value == width %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Height (px)
+    <input type="number" name="{{ height_name }}" value="{{ height }}" min="{{ min_height }}" max="{{ max_height }}" step="4">
+  </label>
+</div>
+{%- endmacro %}

@@ -1100,3 +1100,200 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Panels: apps pinned in a sized frame at the top of the homepage, a
+   database page or a table page. A 12 column grid; each panel spans
+   --panel-span columns. */
+.datasette-app-panels {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  margin: 0.75rem 0 1.25rem;
+}
+
+.datasette-app-panel {
+  background: #fff;
+  border: 1px solid #e4e3df;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  grid-column: span var(--panel-span, 12);
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+@media (max-width: 900px) {
+  .datasette-app-panel {
+    grid-column: span min(12, calc(var(--panel-span, 12) * 2));
+  }
+}
+
+@media (max-width: 560px) {
+  .datasette-app-panel {
+    grid-column: span 12;
+  }
+}
+
+.datasette-app-panel-header {
+  align-items: baseline;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 8px 14px 0;
+}
+
+.datasette-app-panel-header h3 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.datasette-app-panel-header h3 a,
+.datasette-app-panel-header h3 a:visited {
+  color: #52514e;
+  text-decoration: none;
+}
+
+.datasette-app-panel-links {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.datasette-app-panel-links a {
+  margin-left: 0.5rem;
+}
+
+.datasette-app-panel:hover .datasette-app-panel-links,
+.datasette-app-panel:focus-within .datasette-app-panel-links {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .datasette-app-panel-links {
+    opacity: 1;
+  }
+}
+
+/* Without a header the links float over the top right corner on hover */
+.datasette-app-panel-headless .datasette-app-panel-header {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 0 0 0 6px;
+  padding: 4px 10px;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 1;
+}
+
+.datasette-app-panel-headless .datasette-app-panel-header h3 {
+  display: none;
+}
+
+.datasette-app-panel-headless:not(:hover):not(:focus-within) .datasette-app-panel-header {
+  background: transparent;
+}
+
+.datasette-app-panel-frame {
+  border: 0;
+  display: block;
+  width: 100%;
+}
+
+.datasette-app-panel .datasette-app-error-panel {
+  font-size: 0.85rem;
+  margin: 6px 10px 0;
+}
+
+/* Template gallery on the create page and the add-panel page */
+.datasette-app-template-gallery {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  margin: 0.75rem 0 1.5rem;
+}
+
+.datasette-app-template-card,
+.datasette-app-template-card:link,
+.datasette-app-template-card:visited {
+  border: 1px solid #d9dee5;
+  border-radius: 8px;
+  color: #222;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8rem;
+  gap: 4px;
+  line-height: 1.35;
+  padding: 10px;
+  text-decoration: none;
+}
+
+.datasette-app-template-card strong {
+  font-size: 0.9rem;
+}
+
+.datasette-app-template-card span:last-child {
+  color: #666;
+}
+
+.datasette-app-template-card:hover,
+.datasette-app-template-card:focus-visible {
+  background: #f5f9ff;
+  border-color: #2a78d6;
+}
+
+.datasette-app-template-card-selected,
+.datasette-app-template-card-selected:link,
+.datasette-app-template-card-selected:visited {
+  border-color: #2a78d6;
+  box-shadow: 0 0 0 1px #2a78d6;
+}
+
+.datasette-app-template-thumb {
+  background: #fcfcfb;
+  border: 1px solid #efeeeb;
+  border-radius: 5px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.datasette-app-template-thumb svg {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.datasette-app-template-section h2 {
+  font-size: 1.15rem;
+  margin: 1rem 0 0.25rem;
+}
+
+.datasette-app-panel-size-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.datasette-app-panel-size-fields label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  gap: 0.25rem;
+}
+
+.datasette-app-panel-size-fields input[type="number"] {
+  width: 6.5rem;
+}
+
+.datasette-app-panel-admin h2 {
+  font-size: 1.15rem;
+  margin: 1.75rem 0 0.5rem;
+}

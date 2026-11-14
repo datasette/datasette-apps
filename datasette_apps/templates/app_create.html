@@ -17,12 +17,29 @@
 {% import "_llm_prompt.html" as llm_prompt %}
 <h1>Create app</h1>
 
-<form class="datasette-app-form datasette-app-edit-form" method="post">
+{% import "_panel_gallery.html" as panel_gallery %}
+<section class="datasette-app-template-section" aria-labelledby="app-template-heading">
+  <h2 id="app-template-heading">Start from a template</h2>
+  <p class="datasette-app-form-help">
+    Panel templates share one look and are sized to be pinned to the top of a table, database or the homepage.
+    {% if panel_target %}This app will be pinned to <strong>{{ panel_target_label }}</strong>.{% endif %}
+  </p>
+  <div class="datasette-app-template-gallery">
+    <a class="datasette-app-template-card{% if not selected_template %} datasette-app-template-card-selected{% endif %}" href="{{ blank_template_href }}"{% if not selected_template %} aria-current="true"{% endif %}>
+      <span class="datasette-app-template-thumb"><svg viewBox="0 0 120 64" width="120" height="64" aria-hidden="true"><rect x="8" y="10" width="46" height="6" rx="2" fill="#0b0b0b"/><rect x="8" y="24" width="104" height="30" rx="3" fill="#efeeeb"/><rect x="14" y="31" width="60" height="3" rx="1" fill="#c9c8c2"/><rect x="14" y="38" width="80" height="3" rx="1" fill="#c9c8c2"/><rect x="14" y="45" width="40" height="3" rx="1" fill="#c9c8c2"/></svg></span>
+      <strong>Blank app</strong>
+      <span>A full-page starter that queries the databases you select.</span>
+    </a>
+    {{ panel_gallery.cards(panel_templates) }}
+  </div>
+</section>
+
+<form class="datasette-app-form datasette-app-edit-form" method="post"{% if selected_template %} data-template="{{ selected_template.id }}"{% endif %}>
   <div class="datasette-app-edit-layout">
     <div class="datasette-app-edit-main">
       <div class="datasette-app-form-row">
         <label for="app-name">Name</label>
-        <input id="app-name" type="text" name="name">
+        <input id="app-name" type="text" name="name" value="{{ initial_name }}">
       </div>
       <div class="datasette-app-form-row">
         <label for="app-description">Description</label>
@@ -30,7 +47,12 @@
       </div>
       <div class="datasette-app-form-row">
         <label for="html-editor">HTML</label>
-        <textarea id="html-editor" name="html"></textarea>
+        <textarea id="html-editor" name="html">{{ initial_html }}</textarea>
+        {% if selected_template %}
+        <p class="datasette-app-form-help">
+          Built from the <strong>{{ selected_template.name }}</strong> template. Edit the <code>CONFIG</code> block at the top - the query should return: {{ selected_template.sql_shape }}
+        </p>
+        {% endif %}
       </div>
     </div>
 
@@ -80,8 +102,22 @@
 
       {{ csp_origins_field.field(show_csp_section, can_set_csp, csp_origin_options) }}
 
+      {% if panel_target %}
+      <h2>Pin as a panel</h2>
+      <div class="datasette-app-form-row">
+        <input type="hidden" name="panel_target" value="{{ panel_target }}">
+        <input type="hidden" name="panel_database" value="{{ panel_database }}">
+        <input type="hidden" name="panel_table" value="{{ panel_table }}">
+        <p class="datasette-app-form-help">Shown at the top of {{ panel_target_label }} once created.</p>
+        {{ panel_gallery.size_fields(panel_widths, panel_default_width, panel_default_height, "panel_width", "panel_height") }}
+        {% if can_share_panels %}
+        <label><input type="checkbox" name="panel_is_shared" value="1"> Show this panel to everyone who can view the app</label>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <div class="datasette-app-form-actions">
-        <button type="submit">Create app</button>
+        <button type="submit">{% if panel_target %}Create and pin{% else %}Create app{% endif %}</button>
       </div>
     </aside>
   </div>
@@ -96,7 +132,9 @@
     return;
   }
 
-  var autoUpdate = true;
+  // A panel template was chosen server-side: keep its HTML rather than
+  // regenerating the blank starter when the name or databases change.
+  var autoUpdate = !htmlInput.form.hasAttribute("data-template");
   var applyingTemplate = false;
 
   function selectedDatabases() {

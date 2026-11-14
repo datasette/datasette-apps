@@ -1,0 +1,16 @@
+.pk-stat { justify-content: center; }
+/* ==== JS ==== */
+Panel.run({
+  load: async () => (await Panel.query(CONFIG.sql))[0],
+  draw(row, root) {
+    if (!row) return false;
+    const keys = Object.keys(row);
+    const value = "value" in row ? row.value : row[keys[0]];
+    Panel.put(
+      Panel.el("div", {class: "pk-label", text: CONFIG.label}),
+      Panel.el("div", {class: "pk-value", text: Panel.number(value)}),
+      Panel.deltaLine(value, row.previous),
+      CONFIG.caption ? Panel.el("div", {class: "pk-caption", text: CONFIG.caption}) : null
+    );
+  }
+});

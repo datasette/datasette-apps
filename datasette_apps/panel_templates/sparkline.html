@@ -1,0 +1,24 @@
+.pk-sparkline .pk-head { align-items: baseline; display: flex; gap: 10px; }
+.pk-sparkline .pk-value { font-size: clamp(22px, 24vh, 44px); }
+/* ==== JS ==== */
+Panel.run({
+  load: () => Panel.query(CONFIG.sql),
+  draw(rows, root) {
+    if (!rows.length) return false;
+    const points = rows.map(row => ({x: row.x, value: Number(row.value) || 0}));
+    const last = points[points.length - 1].value;
+    const headline = CONFIG.headline === "sum"
+      ? points.reduce((total, point) => total + point.value, 0)
+      : last;
+    const previous = points.length > 1 ? points[points.length - 2].value : null;
+    const chart = Panel.el("div", {class: "pk-grow"});
+    Panel.put(
+      Panel.el("div", {class: "pk-label", text: CONFIG.label}),
+      Panel.el("div", {class: "pk-head"},
+        Panel.el("div", {class: "pk-value", text: Panel.number(headline)}),
+        Panel.deltaLine(last, previous)),
+      chart
+    );
+    Panel.lineChart(chart, points, {label: CONFIG.label});
+  }
+});

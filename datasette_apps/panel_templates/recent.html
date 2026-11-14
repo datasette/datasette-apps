@@ -1,0 +1,33 @@
+.pk-recent ol { list-style: none; margin: 2px 0 0; overflow-y: auto; padding: 0; }
+.pk-recent li {
+  align-items: baseline;
+  border-top: 1px solid var(--pk-line);
+  display: flex;
+  gap: 10px;
+  padding: 6px 0;
+}
+.pk-recent li:first-child { border-top: 0; }
+.pk-recent .pk-main { flex: 1 1 0; min-width: 0; }
+.pk-recent .pk-title, .pk-recent .pk-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-recent .pk-title { font-size: 13px; font-weight: 500; }
+.pk-recent .pk-sub { color: var(--pk-ink-2); font-size: 12px; }
+.pk-recent .pk-meta { color: var(--pk-ink-3); flex: 0 0 auto; font-size: 12px; font-variant-numeric: tabular-nums; }
+/* ==== JS ==== */
+Panel.run({
+  load: () => Panel.query(CONFIG.sql),
+  draw(rows, root) {
+    if (!rows.length) return false;
+    const list = Panel.el("ol", {class: "pk-grow"});
+    for (const row of rows) {
+      const keys = Object.keys(row);
+      const title = "title" in row ? row.title : row[keys[0]];
+      list.append(Panel.el("li", null,
+        Panel.el("div", {class: "pk-main"},
+          Panel.el("div", {class: "pk-title", text: title === null ? "(blank)" : String(title)}),
+          row.subtitle ? Panel.el("div", {class: "pk-sub", text: String(row.subtitle)}) : null),
+        row.meta !== null && row.meta !== undefined
+          ? Panel.el("div", {class: "pk-meta", text: Panel.date(row.meta)}) : null));
+    }
+    Panel.put(Panel.el("div", {class: "pk-label", text: CONFIG.label}), list);
+  }
+});
