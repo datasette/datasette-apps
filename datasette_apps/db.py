@@ -118,6 +118,9 @@ CREATE TABLE IF NOT EXISTS app_panels (
     width INTEGER NOT NULL DEFAULT 12,
     height INTEGER NOT NULL DEFAULT 240,
     show_header INTEGER NOT NULL DEFAULT 1,
+    -- Table panels only: the app may read the page's current filters and
+    -- query the filtered rows
+    share_filters INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -398,6 +401,14 @@ async def ensure_tables(datasette):
                     AND app_revisions.version = apps.current_version
               )
             """)
+        if "app_panels" in existing_tables:
+            panel_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(app_panels)")
+            }
+            if "share_filters" not in panel_columns:
+                conn.execute(
+                    "ALTER TABLE app_panels ADD COLUMN share_filters INTEGER NOT NULL DEFAULT 0"
+                )
         conn.execute("DROP TABLE IF EXISTS app_versions")
         conn.executescript(SCHEMA)
 

@@ -107,7 +107,13 @@ async def test_suggested_config_uses_the_table_columns(datasette):
     # No table: keep the template's built-in sample query
     assert await suggest_panel_config(datasette, "stat", "shop") == {"database": "shop"}
     # The suggested SQL really runs and has the shape the template wants
-    rows = (await datasette.get_database("shop").execute(series["sql"])).rows
+    assert series["table"] == "orders"
+    assert "from {{filtered}}" in series["sql"]
+    rows = (
+        await datasette.get_database("shop").execute(
+            series["sql"].replace("{{filtered}}", "orders")
+        )
+    ).rows
     assert [dict(row) for row in rows] == [
         {"x": "2026-01", "value": 1},
         {"x": "2026-02", "value": 2},
@@ -395,3 +401,153 @@ async def test_agent_can_build_and_pin_a_template_panel(datasette):
     assert "not found" in denied["error"]
     await tools["app_unpin_panel"].fn(datasette, ALICE, panel_id=pinned["panel_id"])
     assert await get_panel(datasette, pinned["panel_id"]) is None
+
+
+async def _page(datasette, app, actor=ALICE, **body):
+    response = await datasette.client.post(
+        f"/-/apps/{app['id']}/page", actor=actor, content=json.dumps(body)
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+@pytest.mark.asyncio
+async def test_filter_sharing_panel_is_told_the_page_filters(datasette):
+    await datasette.invoke_startup()
+    app = await _app(datasette)
+    await create_panel(
+        datasette, ALICE, app["id"], "table", "shop", "orders", share_filters=True
+    )
+    page = await datasette.client.get(
+        "/shop/orders?customer=Ada&_sort_desc=id&_size=1", actor=ALICE
+    )
+    # Display arguments are passed along raw but are not filters
+    assert (
+        "&quot;filters&quot;: {&quot;query_string&quot;: "
+        "&quot;customer=Ada&amp;_sort_desc=id&amp;_size=1&quot;, "
+        "&quot;params&quot;: [[&quot;customer&quot;, &quot;Ada&quot;]], "
+        "&quot;active&quot;: true}"
+    ) in page.text
+    plain = await datasette.client.get("/shop/orders?_sort=id", actor=ALICE)
+    assert "&quot;active&quot;: false" in plain.text
+
+
+@pytest.mark.asyncio
+async def test_panels_do_not_see_filters_unless_opted_in(datasette):
+    await datasette.invoke_startup()
+    app = await _app(datasette)
+    panel = await create_panel(datasette, ALICE, app["id"], "table", "shop", "orders")
+    page = await datasette.client.get("/shop/orders?customer=Ada", actor=ALICE)
+    assert "&quot;filters&quot;" not in page.text
+    refused = await _page(
+        datasette, app, panel_id=panel["id"], kind="rows", query_string="customer=Ada"
+    )
+    assert refused["ok"] is False
+    assert "not allowed to see the page filters" in refused["error"]
+    # Only table panels can share filters
+    database_panel = await create_panel(
+        datasette, ALICE, app["id"], "database", "shop", share_filters=True
+    )
+    assert database_panel["share_filters"] == 0
+
+
+@pytest.mark.asyncio
+async def test_page_rows_and_page_query_apply_the_page_filters(datasette):
+    await datasette.invoke_startup()
+    app = await _app(datasette)
+    panel = await create_panel(
+        datasette, ALICE, app["id"], "table", "shop", "orders", share_filters=True
+    )
+    rows = await _page(
+        datasette,
+        app,
+        panel_id=panel["id"],
+        kind="rows",
+        query_string="customer=Ada&_sort_desc=id&_size=1&_col=id",
+    )
+    assert rows["ok"] is True
+    # Filter and sort follow the page; page size and column choice do not
+    assert [row["id"] for row in rows["result"]["rows"]] == [3, 1]
+    assert rows["result"]["count"] == 2
+    assert "status" in rows["result"]["columns"]
+
+    counted = await _page(
+        datasette,
+        app,
+        panel_id=panel["id"],
+        kind="sql",
+        sql=(
+            "select status, count(*) as n from {{filtered}} "
+            "where id >= :min_id group by 1"
+        ),
+        params={"min_id": 1},
+        query_string="customer=Ada&_size=1&_next=1",
+    )
+    assert counted["result"]["rows"] == [{"status": "Delivered", "n": 2}]
+    # No filters: {{filtered}} is the whole table
+    everything = await _page(
+        datasette,
+        app,
+        panel_id=panel["id"],
+        kind="sql",
+        sql="select count(*) as n from {{filtered}}",
+        query_string="",
+    )
+    assert everything["result"]["rows"] == [{"n": 3}]
+
+    clash = await _page(
+        datasette,
+        app,
+        panel_id=panel["id"],
+        kind="sql",
+        sql="select count(*) from {{filtered}} where id = :p0",
+        params={"p0": 1},
+        query_string="customer=Ada",
+    )
+    assert "reserved for the page filters" in clash["error"]
+    # Still read-only SQL, run through the app's normal query path
+    write = await _page(
+        datasette,
+        app,
+        panel_id=panel["id"],
+        kind="sql",
+        sql="delete from orders",
+        query_string="",
+    )
+    assert write["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_page_data_grants_no_access_the_app_does_not_already_have(datasette):
+    await datasette.invoke_startup()
+    registry = Registry(datasette)
+    # This app has no database on its allow-list
+    app = await registry.create_stored_app(
+        actor_id="alice", name="No access", description="", html="", is_private=False
+    )
+    panel = await create_panel(
+        datasette, ALICE, app["id"], "table", "shop", "orders", share_filters=True
+    )
+    refused = await _page(
+        datasette, app, panel_id=panel["id"], kind="rows", query_string=""
+    )
+    assert refused == {
+        "ok": False,
+        "error": "This app is not allowed to query that database",
+    }
+    # A panel id belonging to a different app is not accepted either
+    other = await _app(datasette)
+    mismatch = await _page(
+        datasette, other, panel_id=panel["id"], kind="rows", query_string=""
+    )
+    assert "only available to pinned panels" in mismatch["error"]
+    # Bob cannot use Alice's personal panel
+    theirs = await create_panel(
+        datasette, ALICE, other["id"], "table", "shop", "orders", share_filters=True
+    )
+    assert (
+        await _page(datasette, other, actor=BOB, panel_id=theirs["id"], kind="rows")
+    )["ok"] is False
+    assert (await _page(datasette, other, panel_id=theirs["id"], kind="rows"))[
+        "ok"
+    ] is True

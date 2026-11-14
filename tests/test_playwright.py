@@ -1161,7 +1161,12 @@ def test_template_panels_render_and_resize_on_a_table_page(tmp_path):
         registry = Registry(datasette)
         apps = {
             # {{table}} resolves to the table the panel is pinned to
-            "stat": {"label": "Rows", "sql": "select count(*) as value from {{table}}"},
+            # {{filtered}} resolves to the table the panel is pinned to,
+            # narrowed to whatever filters the page has applied
+            "stat": {
+                "label": "Rows",
+                "sql": "select count(*) as value from {{filtered}}",
+            },
             "bars": {
                 "label": "By status",
                 "sql": "select status as label, count(*) as value from orders group by 1",
@@ -1187,6 +1192,7 @@ def test_template_panels_render_and_resize_on_a_table_page(tmp_path):
                 width=4,
                 height=60 if template == "note" else 140,
                 is_shared=True,
+                share_filters=template == "stat",
             )
         datasette.close()
 
@@ -1202,6 +1208,13 @@ def test_template_panels_render_and_resize_on_a_table_page(tmp_path):
         stat.locator(".pk-value").wait_for()
         assert stat.locator(".pk-value").inner_text() == "3"
         assert stat.locator(".pk-label").inner_text() == "Rows"
+        assert stat.locator(".pk-filtered").count() == 0
+        assert page.evaluate(
+            """async () => {
+                const frame = document.querySelector("iframe.datasette-app-panel-frame");
+                return frame.srcdoc.includes('"filters": {"query_string": ""');
+            }"""
+        )
         bars = page.frame_locator("iframe.datasette-app-panel-frame >> nth=1")
         bars.locator(".pk-bar").first.wait_for()
         assert bars.locator(".pk-name").all_inner_texts() == ["a", "b"]
@@ -1213,5 +1226,17 @@ def test_template_panels_render_and_resize_on_a_table_page(tmp_path):
         assert frames.nth(0).evaluate("frame => frame.offsetHeight") == 140
         # Panels are compact: no log panel, and nothing went wrong
         assert page.locator(".datasette-app-log-panel").count() == 0
+        assert page.locator(".datasette-app-error-panel:not([hidden])").count() == 0
+
+        # Filter the page: the stat tile follows, the bars panel (which did
+        # not ask for filters) still counts the whole table
+        page.goto(f"{server.url}/shop/orders?status=a")
+        stat = page.frame_locator("iframe.datasette-app-panel-frame >> nth=0")
+        stat.locator(".pk-value").wait_for()
+        assert stat.locator(".pk-value").inner_text() == "2"
+        assert stat.locator(".pk-filtered").inner_text() == "Filtered"
+        bars = page.frame_locator("iframe.datasette-app-panel-frame >> nth=1")
+        bars.locator(".pk-bar").first.wait_for()
+        assert bars.locator(".pk-name").all_inner_texts() == ["a", "b"]
         assert page.locator(".datasette-app-error-panel:not([hidden])").count() == 0
         browser.close()

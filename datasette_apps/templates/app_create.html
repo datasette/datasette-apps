@@ -110,6 +110,9 @@
         <input type="hidden" name="panel_table" value="{{ panel_table }}">
         <p class="datasette-app-form-help">Shown at the top of {{ panel_target_label }} once created.</p>
         {{ panel_gallery.size_fields(panel_widths, panel_default_width, panel_default_height, "panel_width", "panel_height") }}
+        {% if panel_target == "table" %}
+        <label><input type="checkbox" name="panel_share_filters" value="1" checked> Follow the page's filters</label>
+        {% endif %}
         {% if can_share_panels %}
         <label><input type="checkbox" name="panel_is_shared" value="1"> Show this panel to everyone who can view the app</label>
         {% endif %}

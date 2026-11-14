@@ -105,3 +105,12 @@ svg.pk-chart { display: block; overflow: visible; }
 .pk-chart .pk-area { fill: var(--pk-accent-wash); }
 .pk-chart .pk-dot { fill: var(--pk-accent); stroke: #fff; stroke-width: 2; }
 .pk-chart .pk-cross { stroke: var(--pk-ink-3); stroke-width: 1; }
+.pk-filtered {
+  background: var(--pk-accent-soft);
+  border-radius: 3px;
+  color: #104281;
+  font-size: 10.5px;
+  font-weight: 600;
+  margin-left: 6px;
+  padding: 1px 5px;
+}

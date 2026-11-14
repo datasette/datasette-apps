@@ -31,7 +31,9 @@ from .panel_kit import (
     suggest_panel_config,
 )
 from .panels import (
+    PageDataError,
     PanelError,
+    run_page_request,
     add_panel_path,
     can_share_panels,
     can_view_target,
@@ -545,6 +547,7 @@ async def create_app(datasette, request):
                 width=post.get("panel_width"),
                 height=post.get("panel_height"),
                 is_shared=post.get("panel_is_shared") == "1",
+                share_filters=post.get("panel_share_filters") == "1",
             )
         except PanelError:
             # The app itself was created fine, so show it rather than an error
@@ -834,6 +837,28 @@ async def app_query(datasette, request):
         raise NotFound("App not found")
     await _ensure_app_permission(datasette, actor, "view-app", app_id)
     return await _run_query_body(datasette, request, app, actor)
+
+
+async def app_page_data(datasette, request):
+    """Backs datasette.pageRows() and datasette.pageQuery() for a panel
+    pinned to a table page that shares its filters."""
+    actor = request.actor
+    app_id = request.url_vars["id"]
+    app = await Registry(datasette).get_app(app_id)
+    if app is None or app["external"]:
+        raise NotFound("App not found")
+    await _ensure_app_permission(datasette, actor, "view-app", app_id)
+    try:
+        body = json.loads((await request.post_body()).decode("utf-8") or "{}")
+        if not isinstance(body, dict):
+            raise ValueError("body must be a JSON object")
+    except (UnicodeDecodeError, ValueError) as e:
+        return Response.json({"ok": False, "error": f"Invalid request: {e}"})
+    try:
+        result = await run_page_request(datasette, actor, app, body)
+    except PageDataError as e:
+        return Response.json({"ok": False, "error": str(e)})
+    return Response.json({"ok": True, "result": result})
 
 
 async def _debug_job_or_404(datasette, request):

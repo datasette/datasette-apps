@@ -43,6 +43,10 @@ _COMMON_FIELDS = {
         "Database to query. Leave empty to use the database of the page the "
         "panel is pinned to."
     ),
+    "table": (
+        "Table that {{table}} and {{filtered}} in the SQL refer to when the "
+        "panel is not pinned to a table page."
+    ),
     "label": "Short sentence-case label shown above the data.",
     "prefix": 'Text placed before numbers, for example "$".',
     "suffix": 'Text placed after numbers, for example " ms".',
@@ -114,6 +118,7 @@ TEMPLATES = [
         config={
             "label": "Total orders",
             "database": "",
+            "table": "",
             "sql": "select 1284 as value, 1140 as previous",
             "delta_label": "vs previous period",
             "up_is_good": True,
@@ -148,6 +153,7 @@ TEMPLATES = [
         height=96,
         config={
             "database": "",
+            "table": "",
             "sql": (
                 'select 1284 as "Orders", 312 as "Customers", '
                 '58210 as "Revenue", 4.6 as "Avg rating"'
@@ -183,6 +189,7 @@ TEMPLATES = [
         config={
             "label": "Orders per month",
             "database": "",
+            "table": "",
             "sql": (
                 "select '2026-01' as x, 80 as value union all select '2026-02', 96 "
                 "union all select '2026-03', 91 union all select '2026-04', 118 "
@@ -224,6 +231,7 @@ TEMPLATES = [
         config={
             "label": "Orders per month",
             "database": "",
+            "table": "",
             "sql": (
                 "select '2026-01' as x, 80 as value union all select '2026-02', 96 "
                 "union all select '2026-03', 91 union all select '2026-04', 118 "
@@ -259,6 +267,7 @@ TEMPLATES = [
         config={
             "label": "Orders by status",
             "database": "",
+            "table": "",
             "sql": (
                 "select 'Delivered' as label, 840 as value union all "
                 "select 'Shipped', 260 union all select 'Processing', 120 "
@@ -292,6 +301,7 @@ TEMPLATES = [
         config={
             "label": "Latest orders",
             "database": "",
+            "table": "",
             "sql": (
                 "select 'Order #1284' as title, 'Ada Lovelace' as subtitle, "
                 "'2026-05-14' as meta union all "
@@ -323,6 +333,7 @@ TEMPLATES = [
         config={
             "label": "Orders this quarter",
             "database": "",
+            "table": "",
             "sql": "select 1284 as value",
             "goal": 2000,
             "caption": "of quarterly goal",
@@ -357,6 +368,7 @@ TEMPLATES = [
         config={
             "label": "Orders per day",
             "database": "",
+            "table": "",
             "sql": (
                 "with recursive days(day, n) as (select date('2026-05-31'), 0 "
                 "union all select date(day, '-1 day'), n + 1 from days where n < 180) "
@@ -475,7 +487,10 @@ def _config_docs(template):
     if template.sql_shape and "sql" in template.config:
         lines.append(f"// The query returns: {template.sql_shape}")
         lines.append(
-            "// Write {{table}} in the SQL to mean the table the panel is pinned to."
+            "// In the SQL, {{table}} means the table the panel is pinned to and"
+        )
+        lines.append(
+            "// {{filtered}} means that table with the page's current filters applied."
         )
     for key, doc in template.field_docs().items():
         if doc:
@@ -591,7 +606,11 @@ async def suggest_panel_config(datasette, template_id, database=None, table=None
         info = await describe_table(datasette, database, table)
     except Exception:
         return config
-    t = escape_sqlite(table)
+    # {{filtered}} follows the table page's filters when the panel is allowed
+    # to see them, and is the whole of CONFIG.table everywhere else
+    t = "{{filtered}}"
+    if "table" in template.config:
+        config["table"] = table
     title = table[:1].upper() + table[1:]
     date_col = escape_sqlite(info["date_column"]) if info["date_column"] else None
     cat_col = (
@@ -643,7 +662,9 @@ async def suggest_panel_config(datasette, template_id, database=None, table=None
         config.update(
             label=f"Latest {table}",
             sql=(
-                "select " + ", ".join(columns) + f"\nfrom {t}\n"
+                "select " + ", ".join(columns)
+                # rowid is not visible through the {{filtered}} subquery
+                + f"\nfrom {t if date_col else '{{table}}'}\n"
                 f"order by {date_col or 'rowid'} desc limit 8"
             ),
         )

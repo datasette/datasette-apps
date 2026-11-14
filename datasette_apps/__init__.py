@@ -14,6 +14,7 @@ from .permissions import app_permission_sql, register_app_actions
 from .registry import Registry
 from .views import (
     app_json,
+    app_page_data,
     app_query,
     app_revision,
     apps_index,
@@ -52,6 +53,7 @@ def register_routes():
         (r"^/-/apps/(?P<id>[^/]+)/unpin$", unpin_app),
         (r"^/-/apps/(?P<id>[^/]+)/launch$", launch_app),
         (r"^/-/apps/(?P<id>[^/]+)/query$", app_query),
+        (r"^/-/apps/(?P<id>[^/]+)/page$", app_page_data),
         (r"^/-/apps/(?P<id>[^/]+)$", view_app),
     ]
 

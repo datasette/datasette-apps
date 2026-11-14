@@ -132,6 +132,29 @@ A panel is the same sandboxed iframe as the full app page, with the same CSP and
 
 Inside a pinned app, `datasette.context` describes where it is running - `{target: "table", database: "shop", table: "orders", panel: {width, height}}`, or `{target: "app"}` on the app's own page - and `datasette.resize(height)` asks the host page for a different frame height.
 
+#### Panels that follow the page's filters
+
+A panel pinned to a table page can optionally be told about the filters currently applied to that page, so a chart above the table shows the same rows the table does. This is off by default and is switched on per panel with **Let this app see the page's current filters** when pinning, or later in the panel's settings.
+
+With it on, the app gets:
+
+- `datasette.context.filters` - `{query_string, params, active}`. `query_string` is the page's raw query string, `params` is the list of `[key, value]` pairs that actually filter rows (column filters, `_search`, `_where`, `_through`), and `active` says whether there are any.
+- `await datasette.pageQuery(sql, params)` - runs read-only SQL in which `{{filtered}}` stands for the table with the page's filters applied:
+
+  ```javascript
+  const result = await datasette.pageQuery(
+    "select status, count(*) as n from {{filtered}} group by 1"
+  );
+  ```
+
+- `await datasette.pageRows({size})` - the rows the page is showing, in the page's sort order, as `{columns, rows, count}` (up to 100 rows).
+
+Datasette's table pages reload when a filter changes, so the panel always loads with the current filters. Page size, pagination, sort order and column selection are ignored when working out `{{filtered}}`: it is every row matching the filters.
+
+The filtered query is built by Datasette itself - the server asks the table's own JSON API for the SQL behind the page and substitutes that for `{{filtered}}` - so it matches the page exactly and runs with the viewer's permissions. It grants no new access: the table's database must already be on the app's list of SQL query databases, and the page says which panel is asking, not the app.
+
+Panel templates understand `{{filtered}}` in `CONFIG.sql`. When the panel does not have access to the page's filters, or the app is opened on its own page, `{{filtered}}` falls back to the whole table (`CONFIG.table`). A small "Filtered" badge appears next to the label whenever the numbers reflect a filter. Templates started from a table's **Add app panel** page use `{{filtered}}` and have filter-following ticked by default.
+
 #### Panel templates
 
 The create page offers a gallery of **panel templates**, so that panels made by different people (and by agents) look like one family:
@@ -148,13 +171,13 @@ The create page offers a gallery of **panel templates**, so that panels made by 
 | `calendar` | A heatmap of activity by day | rows of `day`, `value` |
 | `note` | A text callout | no query |
 
-Each template is an ordinary self-contained app. It starts with a `CONFIG` block - label, database, SQL, number format - which is the only part that normally needs editing, followed by a shared "panel kit" of styles and helpers that is identical in every template. Writing `{{table}}` in the SQL means "the table this panel is pinned to", so one app can be pinned to several tables.
+Each template is an ordinary self-contained app. It starts with a `CONFIG` block - label, database, SQL, number format - which is the only part that normally needs editing, followed by a shared "panel kit" of styles and helpers that is identical in every template. Writing `{{table}}` in the SQL means "the table this panel is pinned to", so one app can be pinned to several tables, and `{{filtered}}` means that table narrowed to the page's current filters.
 
 Starting a template from a table's **Add app panel** page pre-fills the query from that table's columns (a date-like column to trend over, a low-cardinality text column to group by) and pins the new app back to the table when it is created.
 
 `/-/apps/templates.json` lists the templates and their settings.
 
-If [datasette-agent](https://github.com/datasette/datasette-agent) is installed the agent gets matching tools: `app_panel_templates` lists the templates, `app_create` accepts `template` and `template_config` in place of `html`, and `app_pin_panel` / `app_unpin_panel` place and remove panels. Asking "put a chart of orders per month at the top of the orders table" then costs the agent one SQL query and a few settings rather than a page of HTML.
+If [datasette-agent](https://github.com/datasette/datasette-agent) is installed the agent gets matching tools: `app_panel_templates` lists the templates, `app_create` accepts `template` and `template_config` in place of `html`, and `app_pin_panel` / `app_unpin_panel` place and remove panels (`share_filters` makes a table panel follow the page's filters). Asking "put a chart of orders per month at the top of the orders table" then costs the agent one SQL query and a few settings rather than a page of HTML.
 
 To try all of this against sample data:
 

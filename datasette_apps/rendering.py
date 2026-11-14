@@ -538,9 +538,33 @@ __DEBUG_EXTENSIONS__
         "datasette-stored-query-error"
       );
     },
+    // For a panel pinned to a table page with "share filters" switched on.
+    // pageRows() resolves to the rows the page is showing, as
+    // {columns, rows, count}. pageQuery(sql, params) runs read-only SQL in
+    // which {{filtered}} stands for the table with the page's current
+    // filters applied, for example:
+    //   select status, count(*) as n from {{filtered}} group by 1
+    pageRows: function(options) {
+      return requestDatasette(
+        "pageRows",
+        "datasette-app-page",
+        {kind: "rows", size: options && options.size},
+        "datasette-page-error"
+      );
+    },
+    pageQuery: function(sql, params) {
+      return requestDatasette(
+        "pageQuery",
+        "datasette-app-page",
+        {kind: "sql", sql: sql, params: params},
+        "datasette-page-error"
+      );
+    },
     // Where this app is being shown: {target: "app"} on its own page, or
     // {target: "homepage" | "database" | "table", database, table, panel}
-    // when pinned to the top of a Datasette page as a panel.
+    // when pinned to the top of a Datasette page as a panel. A table panel
+    // that shares filters also gets context.filters:
+    // {query_string, params: [[key, value], ...], active}.
     context: __CONTEXT__,
     // Ask the host page for a different frame height, in CSS pixels. Only
     // honored for pinned panels, where the host clamps it to a sane range.
@@ -586,12 +610,14 @@ def parent_bridge_script(
     channel_token=None,
     mirror_viewport=False,
     panel=False,
+    panel_id=None,
 ):
     """panel=True is the compact host used for apps pinned to the top of
     other pages: no log panel, and the app may ask to be resized."""
     if channel_token is None:
         channel_token = "datasette-apps-test-channel"
     query_endpoint = f"/-/apps/{app_id}/query"
+    page_endpoint = f"/-/apps/{app_id}/page"
     script = """<script>
 (function() {
   var channelToken = __CHANNEL_TOKEN__;
@@ -958,9 +984,11 @@ def parent_bridge_script(
       }
       return;
     }
+    var isPageRequest = message.type === "datasette-app-page";
     if (
       message.type !== "datasette-app-query" &&
-      message.type !== "datasette-app-stored-query"
+      message.type !== "datasette-app-stored-query" &&
+      !isPageRequest
     ) {
       return;
     }
@@ -971,11 +999,24 @@ def parent_bridge_script(
       error: "Query request failed"
     };
     try {
-      var response = await fetch(__QUERY_ENDPOINT__, {
+      var body = message.input || {};
+      if (isPageRequest) {
+        // The host page, not the app, says which panel this is and what
+        // the page's filters are. The server checks the panel opted in.
+        body = {
+          kind: body.kind,
+          sql: body.sql,
+          params: body.params,
+          size: body.size,
+          panel_id: __PANEL_ID__,
+          query_string: window.location.search.replace(/^\?/, "")
+        };
+      }
+      var response = await fetch(isPageRequest ? __PAGE_ENDPOINT__ : __QUERY_ENDPOINT__, {
         method: "POST",
         headers: {"content-type": "application/json"},
         credentials: "same-origin",
-        body: JSON.stringify(message.input || {})
+        body: JSON.stringify(body)
       });
       var json = await response.json();
       reply.ok = !!json.ok;
@@ -1018,6 +1059,8 @@ def parent_bridge_script(
     return (
         script.replace("__IFRAME_ID__", _json_script_string(iframe_id))
         .replace("__QUERY_ENDPOINT__", _json_script_string(query_endpoint))
+        .replace("__PAGE_ENDPOINT__", _json_script_string(page_endpoint))
+        .replace("__PANEL_ID__", json.dumps(panel_id))
         .replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
         .replace("__MIRROR_VIEWPORT__", json.dumps(bool(mirror_viewport)))
         .replace("__PANEL_MODE__", json.dumps(bool(panel)))

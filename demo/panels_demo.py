@@ -128,6 +128,8 @@ async def seed(directory):
             width=size.get("width", template.width),
             height=size.get("height", template.height),
             is_shared=True,
+            # Table panels follow whatever filters the page has applied
+            share_filters=target == "table",
         )
 
     # --- shop/orders table: a full dashboard strip ---
@@ -144,7 +146,7 @@ async def seed(directory):
                 "  count(*) filter (where created_at >= date(m, '-30 days')) as value,\n"
                 "  count(*) filter (where created_at < date(m, '-30 days')\n"
                 "    and created_at >= date(m, '-60 days')) as previous\n"
-                "from orders, (select max(created_at) as m from orders)"
+                "from {{filtered}}, (select max(created_at) as m from orders)"
             ),
             "delta_label": "vs prior 30 days",
         },
@@ -163,7 +165,7 @@ async def seed(directory):
                 "  sum(total) filter (where created_at >= date(m, '-30 days')) as value,\n"
                 "  sum(total) filter (where created_at < date(m, '-30 days')\n"
                 "    and created_at >= date(m, '-60 days')) as previous\n"
-                "from orders, (select max(created_at) as m from orders)"
+                "from {{filtered}}, (select max(created_at) as m from orders)"
             ),
             "delta_label": "vs prior 30 days",
         },
@@ -182,7 +184,7 @@ async def seed(directory):
                 "select\n"
                 "  avg(status = 'Returned') filter (where created_at >= date(m, '-90 days')) as value,\n"
                 "  avg(status = 'Returned') filter (where created_at < date(m, '-90 days')) as previous\n"
-                "from orders, (select max(created_at) as m from orders)"
+                "from {{filtered}}, (select max(created_at) as m from orders)"
             ),
             "delta_label": "last 90 days vs before",
         },
@@ -195,7 +197,7 @@ async def seed(directory):
         width=3,
         config={
             "label": "Orders this quarter",
-            "sql": "select count(*) as value from orders where created_at >= '2026-10-01'",
+            "sql": "select count(*) as value from {{filtered}} where created_at >= '2026-10-01'",
             "goal": 500,
             "caption": "of quarterly goal",
         },
@@ -212,7 +214,7 @@ async def seed(directory):
         height=230,
         config={
             "label": "Orders by channel",
-            "sql": "select channel as label, count(*) as value\nfrom orders\ngroup by 1 order by 2 desc",
+            "sql": "select channel as label, count(*) as value\nfrom {{filtered}}\ngroup by 1 order by 2 desc",
         },
     )
     await panel("calendar", "Order activity", "table", "orders")

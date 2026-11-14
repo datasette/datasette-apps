@@ -28,6 +28,12 @@
   <div class="datasette-app-form-row">
     <label><input type="checkbox" name="show_header" value="1"{% if panel.show_header %} checked{% endif %}> Show the app name above the panel</label>
   </div>
+  {% if panel.target_type == "table" %}
+  <div class="datasette-app-form-row">
+    <label><input type="checkbox" name="share_filters" value="1"{% if panel.share_filters %} checked{% endif %}> Let this app see the page's current filters</label>
+    <p class="datasette-app-form-help">The app can then chart just the rows the page is filtered to.</p>
+  </div>
+  {% endif %}
   {% if can_share %}
   <div class="datasette-app-form-row">
     <label><input type="checkbox" name="is_shared" value="1"{% if panel.is_shared %} checked{% endif %}> Show this panel to everyone who can view the app</label>

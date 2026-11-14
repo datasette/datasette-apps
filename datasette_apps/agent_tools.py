@@ -91,7 +91,15 @@ APP_TOOL_DESCRIPTIONS = {
         "four width-3 stat tiles make a row. The panel is only visible to "
         "the current user unless shared is true, which needs the "
         "apps-share-panels permission. Inside a pinned app, "
-        "datasette.context gives {target, database, table}."
+        "datasette.context gives {target, database, table}. For a table "
+        "target, pass share_filters true to make the panel follow the "
+        "filters the user applies on the table page: write {{filtered}} in "
+        "place of the table name in a template's SQL (select count(*) as "
+        "value from {{filtered}}) and it becomes the table restricted to "
+        "the page's current filters. Hand-written apps get the same through "
+        "await datasette.pageQuery(sql, params), plus await "
+        "datasette.pageRows() for the rows shown and "
+        "datasette.context.filters for the raw filter arguments."
     ),
     "unpin_panel": (
         "Remove a panel from the page it is pinned to, by panel_id. The "
@@ -462,6 +470,7 @@ async def _app_pin_panel(
     width=None,
     height=None,
     shared=False,
+    share_filters=False,
 ):
     if width is None or height is None:
         version = await Registry(datasette).get_current_version(app_id)
@@ -480,6 +489,7 @@ async def _app_pin_panel(
             width=width,
             height=height,
             is_shared=bool(shared),
+            share_filters=bool(share_filters),
         )
     except PanelError as e:
         return _error(str(e), app_id)
@@ -493,6 +503,7 @@ async def _app_pin_panel(
             "width": panel["width"],
             "height": panel["height"],
             "shared": bool(panel["is_shared"]),
+            "share_filters": bool(panel["share_filters"]),
             "path": target_path(
                 datasette,
                 panel["target_type"],
@@ -1055,6 +1066,14 @@ def get_app_edit_tools(AgentTool, datasette=None):
                     "height": {
                         "type": "integer",
                         "description": "Frame height in pixels",
+                    },
+                    "share_filters": {
+                        "type": "boolean",
+                        "description": (
+                            "Table targets only: let the app read the page's "
+                            "current filters and query the filtered rows; "
+                            "defaults to false"
+                        ),
                     },
                     "shared": {
                         "type": "boolean",

@@ -4,14 +4,16 @@ database page or a table page."""
 from __future__ import annotations
 
 import html
+import re
 import secrets
 from datetime import datetime, timezone
-from urllib.parse import quote, unquote, urlencode
+from urllib.parse import parse_qsl, quote, unquote, urlencode
 
 from datasette import Forbidden, NotFound, Response
 from datasette.resources import DatabaseResource, TableResource
 
 from .csp import APP_VIEW_PARENT_CSP, build_csp
+from .data_access import AppQueryError, run_app_query
 from .panel_kit import (
     DEFAULT_PANEL_HEIGHT,
     DEFAULT_PANEL_WIDTH,
@@ -40,7 +42,7 @@ PANEL_COLUMNS = """
     app_panels.id, app_panels.app_id, app_panels.target_type,
     app_panels.database_name, app_panels.table_name, app_panels.actor_id,
     app_panels.is_shared, app_panels.width, app_panels.height,
-    app_panels.show_header, app_panels.sort_order, app_panels.created_at,
+    app_panels.show_header, app_panels.share_filters, app_panels.sort_order, app_panels.created_at,
     app_panels.updated_at
 """
 
@@ -146,6 +148,7 @@ async def create_panel(
     height=None,
     is_shared=False,
     show_header=None,
+    share_filters=False,
 ):
     """Pin an app to a page for this actor. Raises PanelError with a
     message that is safe to show to the user (or an agent).
@@ -197,9 +200,9 @@ async def create_panel(
             """
             INSERT INTO app_panels (
                 app_id, target_type, database_name, table_name, actor_id,
-                is_shared, width, height, show_header, sort_order,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                is_shared, width, height, show_header, share_filters,
+                sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 app_id,
@@ -211,6 +214,7 @@ async def create_panel(
                 clean_width(width),
                 clean_height(height),
                 int(bool(show_header)),
+                int(bool(share_filters) and target_type == "table"),
                 sort_order,
                 now,
                 now,
@@ -231,7 +235,14 @@ async def get_panel(datasette, panel_id):
 
 
 async def update_panel(datasette, panel_id, **values):
-    allowed = {"width", "height", "is_shared", "show_header", "sort_order"}
+    allowed = {
+        "width",
+        "height",
+        "is_shared",
+        "show_header",
+        "share_filters",
+        "sort_order",
+    }
     values = {key: value for key, value in values.items() if key in allowed}
     if not values:
         return
@@ -309,6 +320,8 @@ async def render_panels(datasette, request, target_type, database="", table=""):
             "table": table or None,
             "panel": {"width": panel["width"], "height": panel["height"]},
         }
+        if target_type == "table" and panel["share_filters"]:
+            context["filters"] = page_filters(request.query_string)
         srcdoc = build_app_srcdoc(
             version["html"], csp, iframe_bridge_script(token, context=context)
         )
@@ -338,7 +351,11 @@ async def render_panels(datasette, request, target_type, database="", table=""):
             f' data-panel-id="{panel["id"]}" data-app-id="{_e(panel["app_id"])}">'
             + header
             + parent_bridge_script(
-                panel["app_id"], iframe_id=iframe_id, channel_token=token, panel=True
+                panel["app_id"],
+                iframe_id=iframe_id,
+                channel_token=token,
+                panel=True,
+                panel_id=panel["id"],
             )
             + f'<iframe id="{iframe_id}" class="datasette-app-panel-frame"'
             f' title="{_e(panel["app_name"])}" sandbox="allow-scripts allow-forms"'
@@ -356,6 +373,157 @@ async def render_panels(datasette, request, target_type, database="", table=""):
         + "".join(articles)
         + "</section>"
     )
+
+
+# --- Page filters --------------------------------------------------------
+
+# Query string arguments that narrow which rows a table page shows. Other
+# underscore arguments (_sort, _size, _next, _col, _facet...) change how
+# the page is displayed, not which rows match.
+_FILTER_UNDERSCORE_ARGS = {"_search", "_where", "_through"}
+_SORT_ARGS = {"_sort", "_sort_desc"}
+PAGE_ROWS_MAX = 100
+
+
+def _is_filter_arg(key):
+    return (
+        not key.startswith("_")
+        or key in _FILTER_UNDERSCORE_ARGS
+        or key.startswith("_search_")
+    )
+
+
+def filter_args(query_string, keep_sort=False):
+    return [
+        (key, value)
+        for key, value in parse_qsl(query_string or "", keep_blank_values=True)
+        if _is_filter_arg(key) or (keep_sort and key in _SORT_ARGS)
+    ]
+
+
+def page_filters(query_string):
+    """What a filter-sharing panel is told about the page it is on."""
+    args = filter_args(query_string)
+    return {
+        "query_string": query_string or "",
+        "params": [list(pair) for pair in args],
+        "active": bool(args),
+    }
+
+
+class PageDataError(Exception):
+    pass
+
+
+async def _table_json(datasette, actor, database, table, args):
+    path = datasette.urls.table(database, table, format="json")
+    response = await datasette.client.get(path + "?" + urlencode(args), actor=actor)
+    try:
+        data = response.json()
+    except ValueError as e:
+        raise PageDataError("Could not read the page data") from e
+    if response.status_code in (401, 403):
+        raise PageDataError("Permission denied by Datasette")
+    if response.status_code != 200 or data.get("ok") is False:
+        raise PageDataError(data.get("error") or "Could not read the page data")
+    return data
+
+
+_FILTERED_PLACEHOLDER = re.compile(r"\{\{\s*filtered\s*\}\}")
+_TRAILING_LIMIT = re.compile(r"\s+limit\s+\d+\s*$", re.IGNORECASE)
+
+
+async def filtered_table_sql(datasette, actor, database, table, query_string):
+    """The SQL (and named parameters) selecting every row that matches the
+    page's filters. Datasette builds the query, so facets, search, _where
+    and its permission checks all behave exactly as they do on the page;
+    we only drop the page-size LIMIT."""
+    data = await _table_json(
+        datasette,
+        actor,
+        database,
+        table,
+        filter_args(query_string) + [("_extra", "query"), ("_size", "0")],
+    )
+    query = data.get("query") or {}
+    if not query.get("sql"):
+        raise PageDataError("Could not read the page query")
+    return _TRAILING_LIMIT.sub("", query["sql"]), dict(query.get("params") or {})
+
+
+async def run_page_request(datasette, actor, app, body):
+    """Serve datasette.pageRows() / datasette.pageQuery() for one panel."""
+    panel = None
+    try:
+        panel = await get_panel(datasette, int(body.get("panel_id")))
+    except (TypeError, ValueError):
+        pass
+    if (
+        panel is None
+        or panel["app_id"] != app["id"]
+        or not (panel["is_shared"] or panel["actor_id"] == _actor_id(actor))
+    ):
+        raise PageDataError("Page data is only available to pinned panels")
+    if panel["target_type"] != "table":
+        raise PageDataError("Page data is only available on table pages")
+    if not panel["share_filters"]:
+        raise PageDataError(
+            "This panel is not allowed to see the page filters - switch that "
+            "on in the panel settings"
+        )
+    database, table = panel["database_name"], panel["table_name"]
+    # No new access: the app must already be allowed to query this database
+    if database not in await Registry(datasette).get_sql_databases(app["id"]):
+        raise PageDataError("This app is not allowed to query that database")
+    query_string = body.get("query_string")
+    if not isinstance(query_string, str):
+        query_string = ""
+
+    if body.get("kind") == "rows":
+        try:
+            size = int(body.get("size") or PAGE_ROWS_MAX)
+        except (TypeError, ValueError):
+            size = PAGE_ROWS_MAX
+        data = await _table_json(
+            datasette,
+            actor,
+            database,
+            table,
+            filter_args(query_string, keep_sort=True)
+            + [
+                ("_shape", "objects"),
+                ("_extra", "columns,count"),
+                ("_size", str(max(1, min(PAGE_ROWS_MAX, size)))),
+            ],
+        )
+        return {
+            "columns": data.get("columns") or [],
+            "rows": data.get("rows") or [],
+            "count": data.get("count"),
+        }
+
+    sql = body.get("sql")
+    if not isinstance(sql, str) or not sql.strip():
+        raise PageDataError("pageQuery() needs a SQL string")
+    params = body.get("params") or {}
+    if not isinstance(params, dict):
+        raise PageDataError("Query parameters must be an object of named values")
+    filtered_sql, filtered_params = await filtered_table_sql(
+        datasette, actor, database, table, query_string
+    )
+    clash = set(params) & set(filtered_params)
+    if clash:
+        raise PageDataError(
+            "Parameter names are reserved for the page filters: "
+            + ", ".join(sorted(clash))
+        )
+    sql = _FILTERED_PLACEHOLDER.sub(lambda match: f"({filtered_sql})", sql)
+    try:
+        return await run_app_query(
+            datasette, app, actor, database, sql, {**filtered_params, **params}
+        )
+    except AppQueryError as e:
+        raise PageDataError(str(e)) from e
 
 
 def frame_csp_asgi_wrapper(app):
@@ -497,6 +665,7 @@ async def add_panel(datasette, request):
                 height=post.get("height"),
                 is_shared=post.get("is_shared") == "1",
                 show_header={"1": True, "0": False}.get(post.get("show_header")),
+                share_filters=post.get("share_filters") == "1",
             )
         except PanelError as e:
             raise Forbidden(str(e))
@@ -595,6 +764,9 @@ async def edit_panel(datasette, request):
             "width": clean_width(post.get("width"), panel["width"]),
             "height": clean_height(post.get("height"), panel["height"]),
             "show_header": int(post.get("show_header") == "1"),
+            "share_filters": int(
+                post.get("share_filters") == "1" and panel["target_type"] == "table"
+            ),
         }
         try:
             values["sort_order"] = int(post.get("sort_order"))

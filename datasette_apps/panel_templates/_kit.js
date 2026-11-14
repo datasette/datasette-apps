@@ -3,16 +3,34 @@ const Panel = (() => {
   const context = (window.datasette && datasette.context) || {target: "app"};
   const quoteName = name => '"' + String(name).replace(/"/g, '""') + '"';
 
-  // {{table}} in CONFIG.sql becomes the table this panel is pinned to, so
-  // one app can be pinned to several tables.
+  // The table this panel is about: the page it is pinned to, else CONFIG.table
+  const tableName = context.table || CONFIG.table;
+  const FILTERED = /\{\{\s*filtered\s*\}\}/g;
+  // True when the page's filters are shared with this panel
+  const followsFilters = !!(context.filters && window.datasette && datasette.pageQuery);
+  let usedFilters = false;
+
+  // {{table}} in CONFIG.sql becomes the table this panel is about, so one
+  // app can be pinned to several tables.
   const expandSql = sql => String(sql).replace(/\{\{\s*table\s*\}\}/g, () => {
-    if (!context.table) {
-      throw new Error("This panel uses {{table}}: pin it to a table page");
+    if (!tableName) {
+      throw new Error("This panel needs a table: pin it to a table page or set CONFIG.table");
     }
-    return quoteName(context.table);
+    return quoteName(tableName);
   });
 
+  // {{filtered}} means "the table, with the page's current filters applied".
+  // That needs the host page's help; without it the whole table is used.
   async function query(sql, params) {
+    sql = String(sql);
+    if (FILTERED.test(sql)) {
+      FILTERED.lastIndex = 0;
+      if (followsFilters) {
+        usedFilters = true;
+        return (await datasette.pageQuery(expandSql(sql), params || {})).rows;
+      }
+      sql = sql.replace(FILTERED, "{{table}}");
+    }
     const database = CONFIG.database || context.database;
     if (!database) {
       throw new Error("Set CONFIG.database, or pin this panel to a database or table page");
@@ -227,6 +245,11 @@ const Panel = (() => {
       root.textContent = "";
       try {
         if (template.draw(data, root) === false) state("empty", CONFIG.empty_text || "No data");
+        // Say so when the numbers reflect the page's filters, not the whole table
+        const label = root.querySelector(".pk-label");
+        if (label && usedFilters && context.filters.active) {
+          label.append(el("span", {class: "pk-filtered", text: "Filtered"}));
+        }
       } catch (error) {
         state("error", error.message || String(error));
       }

@@ -63,6 +63,10 @@
         <option value="0">Hide</option>
       </select>
     </div>
+    <div class="datasette-app-form-row">
+      <label><input type="checkbox" name="share_filters" value="1"> Let this app see the page's current filters</label>
+      <p class="datasette-app-form-help">Table pages only. The app can then chart just the rows the page is filtered to. It still needs query access to the table's database.</p>
+    </div>
     {% if can_share %}
     <div class="datasette-app-form-row">
       <label><input type="checkbox" name="is_shared" value="1"> Show this panel to everyone who can view the app</label>
