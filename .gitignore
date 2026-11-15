@@ -1,4 +1,5 @@
 internal.db
+.claude
 .venv
 __pycache__/
 *.py[cod]
