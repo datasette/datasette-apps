@@ -4,9 +4,10 @@ import json
 import re
 from datetime import datetime, timezone
 
-from .db import ensure_tables
+from .db import ensure_tables, replace_app_links
 from .ids import monotonic_ulid
 from .csp import normalize_connect_origin
+from .links import normalize_links, parse_app_links
 
 
 def _now():
@@ -134,6 +135,8 @@ def _insert_revision(conn, app_id, changes, now, actor_id=None):
         """,
         (next_version, now, app_id),
     )
+    if "html" in changes:
+        replace_app_links(conn, app_id, parse_app_links(changes["html"])[0])
     return next_version
 
 
@@ -251,6 +254,7 @@ class Registry:
         _validate_external_id(id)
         await self.ensure_tables()
         now = _now()
+        links, _ = normalize_links((metadata or {}).get("links") or [])
         await self.db.execute_write(
             """
             INSERT INTO apps (
@@ -282,6 +286,7 @@ class Registry:
                 "now": now,
             },
         )
+        await self.db.execute_write_fn(lambda conn: replace_app_links(conn, id, links))
 
     async def add_apps(self, apps, source=None):
         for app in apps:
@@ -380,6 +385,7 @@ class Registry:
                 """,
                 [(app_id, origin, now, now) for origin in csp_origins],
             )
+            replace_app_links(conn, app_id, parse_app_links(html)[0])
 
         await self.db.execute_write_fn(create)
         return await self.get_app(app_id)
@@ -638,6 +644,9 @@ class Registry:
 
     async def remove_app(self, id):
         await self.ensure_tables()
+        await self.db.execute_write(
+            "DELETE FROM app_links WHERE app_id = :id", {"id": id}
+        )
         await self.db.execute_write("DELETE FROM apps WHERE id = :id", {"id": id})
 
     async def delete_stored_app(self, app_id, actor_id=None):
@@ -673,9 +682,38 @@ class Registry:
     async def remove_apps_for_source(self, source):
         await self.ensure_tables()
         await self.db.execute_write(
+            """
+            DELETE FROM app_links WHERE app_id IN (
+                SELECT id FROM apps WHERE external = 1 AND source = :source
+            )
+            """,
+            {"source": source},
+        )
+        await self.db.execute_write(
             "DELETE FROM apps WHERE external = 1 AND source = :source",
             {"source": source},
         )
+
+    async def get_links(self, app_id):
+        """The fragment URL templates this app advertises."""
+        await self.ensure_tables()
+        result = await self.db.execute(
+            """
+            SELECT template, description, params
+            FROM app_links
+            WHERE app_id = :app_id
+            ORDER BY position
+            """,
+            {"app_id": app_id},
+        )
+        return [
+            {
+                "template": row["template"],
+                "description": row["description"],
+                "params": _decode_json(row["params"], {}),
+            }
+            for row in result.rows
+        ]
 
     async def get_app(self, id, include_deleted=False):
         await self.ensure_tables()

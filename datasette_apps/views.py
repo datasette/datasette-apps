@@ -759,7 +759,13 @@ async def debug_frame(datasette, request):
     document = build_app_srcdoc(
         version["html"],
         csp,
-        iframe_bridge_script(job["config"]["channel_token"], debug=True),
+        iframe_bridge_script(
+            job["config"]["channel_token"],
+            debug=True,
+            # Always explicit: the harness page's own fragment belongs
+            # to the chat UI, not to the app being debugged.
+            initial_hash=job["config"].get("hash") or "",
+        ),
     )
     return Response.json(
         {"ok": True, "document": document},

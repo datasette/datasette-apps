@@ -101,7 +101,13 @@ async def test_app_debug_tool_is_registered():
     tool = tools["app_debug"]
     assert tool.input_schema["required"] == ["app_id", "javascript"]
     properties = tool.input_schema["properties"]
-    assert set(properties) == {"app_id", "javascript", "viewport", "timeout_ms"}
+    assert set(properties) == {
+        "app_id",
+        "javascript",
+        "viewport",
+        "timeout_ms",
+        "hash",
+    }
     assert properties["viewport"]["type"] == "object"
     assert properties["timeout_ms"]["type"] == "integer"
     assert "debug.waitFor" in tool.description

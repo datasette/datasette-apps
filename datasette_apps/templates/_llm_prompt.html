@@ -173,8 +173,14 @@
       "- Remote images are allowed from those same exact https:// origins. Local file previews using data: and blob: image URLs are allowed.\n" +
       "- External script tags are allowed from those same exact https:// origins.\n" +
       "- External stylesheet links and style elements are allowed from those same exact https:// origins.\n" +
-      "- history.replaceState(), history.pushState(), history.back(), history.forward(), and history.go() are no-ops in the sandbox.\n" +
+      "- history.back(), history.forward(), and history.go() are no-ops in the sandbox. history.pushState() and history.replaceState() only work with a fragment-only URL such as \"#/customer/42\", which sets location.hash.\n" +
       "- CORS still applies even when an origin is granted.\n\n" +
+      "Linkable state:\n" +
+      "- Keep view state worth returning to in the URL fragment. location.hash and ordinary <a href=\"#/customer/42\"> links work, and the fragment is mirrored to the page URL so views can be bookmarked, shared and linked to from other apps.\n" +
+      "- Read location.hash at startup and re-render on the hashchange event.\n" +
+      "- Treat the fragment as untrusted input that only selects what to show. Never write data just because a fragment was loaded.\n" +
+      "- Advertise the fragments the app supports with a manifest in the HTML, so other apps can link to them: <script type=\"application/json\" id=\"datasette-app-links\">[{\"template\": \"#/customer/{id}\", \"description\": \"Detail view for one customer\", \"params\": {\"id\": {\"column\": \"sales/customers/id\"}}}]<\/script>\n" +
+      "- Link to a view in another app with a root-relative URL: <a href=\"/-/apps/APP_ID#/customer/42\">.\n\n" +
       "Use this API for data access:\n" +
       "- await datasette.query(database, sql, params?)\n" +
       "- The SQL must be read-only.\n" +

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+
+from .links import normalize_links, parse_app_links
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS apps (
     id TEXT PRIMARY KEY,
@@ -103,6 +107,17 @@ CREATE TABLE IF NOT EXISTS app_csp_origins (
 CREATE INDEX IF NOT EXISTS idx_app_csp_origins_app
     ON app_csp_origins(app_id, directive);
 
+-- Fragment URLs each app advertises, extracted from the link manifest in
+-- its HTML (or from metadata["links"] for external apps) on every save.
+CREATE TABLE IF NOT EXISTS app_links (
+    app_id TEXT NOT NULL REFERENCES apps(id),
+    position INTEGER NOT NULL,
+    template TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    params TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (app_id, position)
+);
+
 CREATE TABLE IF NOT EXISTS _app_debug_jobs (
     id TEXT PRIMARY KEY,
     actor_id TEXT NOT NULL,
@@ -137,6 +152,51 @@ CREATE INDEX IF NOT EXISTS idx_app_user_state_actor_pinned
 CREATE INDEX IF NOT EXISTS idx_app_user_state_actor_recent
     ON app_user_state(actor_id, last_accessed_at DESC, app_id);
 """
+
+
+def replace_app_links(conn, app_id, links):
+    conn.execute("DELETE FROM app_links WHERE app_id = ?", (app_id,))
+    conn.executemany(
+        """
+        INSERT INTO app_links (app_id, position, template, description, params)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                app_id,
+                position,
+                link["template"],
+                link["description"],
+                json.dumps(link["params"], sort_keys=True),
+            )
+            for position, link in enumerate(links)
+        ],
+    )
+
+
+def _backfill_app_links(conn):
+    """Apps saved before link manifests existed: read them from the
+    current HTML (stored apps) or metadata (external apps)."""
+    for app_id, external, metadata in conn.execute(
+        "SELECT id, external, metadata FROM apps WHERE deleted_at IS NULL"
+    ).fetchall():
+        if external:
+            try:
+                links, _ = normalize_links(json.loads(metadata or "{}").get("links"))
+            except (ValueError, AttributeError):
+                links = []
+        else:
+            row = conn.execute(
+                """
+                SELECT html FROM app_revisions
+                WHERE app_id = ? AND html IS NOT NULL
+                ORDER BY version DESC LIMIT 1
+                """,
+                (app_id,),
+            ).fetchone()
+            links, _ = parse_app_links(row[0] if row else "")
+        if links:
+            replace_app_links(conn, app_id, links)
 
 
 async def ensure_tables(datasette):
@@ -372,5 +432,7 @@ async def ensure_tables(datasette):
             """)
         conn.execute("DROP TABLE IF EXISTS app_versions")
         conn.executescript(SCHEMA)
+        if "apps" in existing_tables and "app_links" not in existing_tables:
+            _backfill_app_links(conn)
 
     await internal_db.execute_write_fn(create_schema)

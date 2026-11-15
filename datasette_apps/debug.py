@@ -101,6 +101,7 @@ async def create_debug_job(
     timeout_ms=None,
     conversation_id=None,
     call_key=None,
+    hash=None,
 ):
     registry = Registry(datasette)
     await registry.ensure_tables()
@@ -112,7 +113,13 @@ async def create_debug_job(
         raise ValueError("App has no saved revision to debug")
     if not javascript or not isinstance(javascript, str):
         raise ValueError("javascript is required")
+    hash = hash or ""
+    if not isinstance(hash, str) or len(hash) > 2000:
+        raise ValueError("hash must be a string of at most 2000 characters")
+    if hash and not hash.startswith("#"):
+        hash = "#" + hash
     config = {
+        "hash": hash,
         "viewport": validate_viewport(viewport),
         "timeout_ms": clamp_timeout_ms(timeout_ms),
         "channel_token": secrets.token_urlsafe(32),
