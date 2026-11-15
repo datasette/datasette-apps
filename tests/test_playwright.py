@@ -844,6 +844,9 @@ HASH_ROUTER_APP = """<!doctype html>
   <a id="to-b" href="#/item/b">B</a>
   <a id="to-c" href="#/item/c"><span id="to-c-inner">C</span></a>
   <button id="push" onclick="history.pushState(null, '', '#/item/pushed')">Push</button>
+  <button id="replace-1" onclick="history.replaceState(null, '', '#/item/replaced-1')">Replace 1</button>
+  <button id="replace-2" onclick="history.replaceState(null, '', '#/item/replaced-2')">Replace 2</button>
+  <button id="replace-empty" onclick="history.replaceState(null, '', '#')">Replace empty</button>
 </nav>
 <p id="view"></p>
 <script>
@@ -969,6 +972,50 @@ def test_history_push_state_with_a_fragment_sets_the_fragment(tmp_path):
         _iframe(page).locator("#push").click()
         _wait_for_view(page, "#/item/pushed")
         _wait_for_page_hash(page, "#/item/pushed")
+
+
+def test_history_replace_state_does_not_add_a_history_entry(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Hash router"))
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app))
+        _wait_for_view(page, "(home)")
+        _iframe(page).locator("#to-b").click()
+        _wait_for_page_hash(page, "#/item/b")
+        history_length = page.evaluate("history.length")
+
+        # As an app does to keep a search box or filter in the fragment
+        _iframe(page).locator("#replace-1").click()
+        _wait_for_view(page, "#/item/replaced-1")
+        _wait_for_page_hash(page, "#/item/replaced-1")
+        _iframe(page).locator("#replace-2").click()
+        _wait_for_view(page, "#/item/replaced-2")
+        _wait_for_page_hash(page, "#/item/replaced-2")
+        assert page.evaluate("history.length") == history_length
+        # Still the same document, not a reload of the app
+        assert _iframe(page).evaluate("window.hashAtStartup") == ""
+
+        # One step back leaves every replaced fragment behind
+        page.evaluate("history.back()")
+        _wait_for_view(page, "(home)")
+        _wait_for_page_hash(page, "")
+
+
+def test_history_replace_state_can_clear_the_fragment(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Hash router"))
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app) + "#/item/a")
+        _wait_for_view(page, "#/item/a")
+        _iframe(page).evaluate("window.loadedOnce = true")
+        history_length = page.evaluate("history.length")
+        _iframe(page).locator("#replace-empty").click()
+        _wait_for_view(page, "(home)")
+        _wait_for_page_hash(page, "")
+        assert page.evaluate("history.length") == history_length
+        assert _iframe(page).evaluate("window.loadedOnce") is True
 
 
 def test_link_to_a_fragment_in_another_app_navigates_without_a_modal(tmp_path):

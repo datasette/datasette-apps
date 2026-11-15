@@ -173,7 +173,7 @@
       "- Remote images are allowed from those same exact https:// origins. Local file previews using data: and blob: image URLs are allowed.\n" +
       "- External script tags are allowed from those same exact https:// origins.\n" +
       "- External stylesheet links and style elements are allowed from those same exact https:// origins.\n" +
-      "- history.back(), history.forward(), and history.go() are no-ops in the sandbox. history.pushState() and history.replaceState() only work with a fragment-only URL such as \"#/customer/42\", which sets location.hash.\n" +
+      "- history.back(), history.forward(), and history.go() are no-ops in the sandbox. history.pushState() and history.replaceState() only work with a fragment-only URL such as \"#/customer/42\", which sets location.hash; use replaceState() for changes that should not add a back button step, such as typing in a search box.\n" +
       "- CORS still applies even when an origin is granted.\n\n" +
       "Linkable state:\n" +
       "- Keep view state worth returning to in the URL fragment. location.hash and ordinary <a href=\"#/customer/42\"> links work, and the fragment is mirrored to the page URL so views can be bookmarked, shared and linked to from other apps.\n" +

@@ -181,17 +181,25 @@ def iframe_bridge_script(channel_token=None, debug=False, initial_hash=None):
     }
   }
 
-  function setHash(value) {
+  // replace swaps the current history entry instead of adding one.
+  function setHash(value, replace) {
     value = normalizeHash(value);
     if (value === currentHash()) {
       return;
     }
     try {
-      // Always the hash setter, never location.replace("#...") or an
-      // <a href="#..."> default action: a srcdoc document's base URL is
-      // the embedding page's URL, so those resolve to that page and
-      // navigate the iframe away from the app.
-      window.location.hash = value;
+      // Never location.replace("#...") or an <a href="#..."> default
+      // action: a srcdoc document's base URL is the embedding page's
+      // URL, so those resolve to that page and navigate the iframe away
+      // from the app. Replacing needs this document's own absolute URL,
+      // and a fragment that is present even when empty - without one it
+      // would be a reload rather than a fragment navigation.
+      var documentUrl = window.location.href.split("#")[0];
+      if (replace && documentUrl === "about:srcdoc") {
+        window.location.replace(documentUrl + (value || "#"));
+      } else {
+        window.location.hash = value;
+      }
     } catch (ignore) {
     }
   }
@@ -219,16 +227,25 @@ def iframe_bridge_script(channel_token=None, debug=False, initial_hash=None):
 
   // pushState/replaceState throw in a sandboxed srcdoc document. A
   // fragment-only URL is the one thing they can usefully mean here.
-  function hashHistoryMethod(state, title, url) {
+  function pushStateMethod(state, title, url) {
     if (typeof url === "string" && url.charAt(0) === "#") {
       setHash(url);
     }
   }
 
+  function replaceStateMethod(state, title, url) {
+    if (typeof url === "string" && url.charAt(0) === "#") {
+      setHash(url, true);
+    }
+  }
+
   function shimHistoryMethod(name) {
-    var method = (name === "pushState" || name === "replaceState")
-      ? hashHistoryMethod
-      : noopHistoryMethod;
+    var method = noopHistoryMethod;
+    if (name === "pushState") {
+      method = pushStateMethod;
+    } else if (name === "replaceState") {
+      method = replaceStateMethod;
+    }
     try {
       Object.defineProperty(window.history, name, {
         value: method,

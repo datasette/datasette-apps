@@ -57,7 +57,7 @@ Entries without a scheme are treated as `https://` origins.
 
 The iframe bridge reports JavaScript errors, unhandled promise rejections, CSP violations, failed resources, fetch failures, `console.error()` calls, and failed Datasette data queries back to the parent page. The app page shows these in a small expandable error panel above the iframe. It also captures `console.log()` messages and Datasette data helper calls in a collapsed log panel below the iframe.
 
-The bridge also replaces `history.back()`, `history.forward()`, and `history.go()` with no-op functions inside the sandboxed iframe, avoiding browser errors from apps that try to manage URL state. `history.pushState()` and `history.replaceState()` are no-ops too, unless they are passed a fragment-only URL such as `#/customer/42`, which sets `location.hash`.
+The bridge also replaces `history.back()`, `history.forward()`, and `history.go()` with no-op functions inside the sandboxed iframe, avoiding browser errors from apps that try to manage URL state. `history.pushState()` and `history.replaceState()` are no-ops too, unless they are passed a fragment-only URL such as `#/customer/42`, which sets `location.hash`. `replaceState()` does this without adding a browser history entry.
 
 ### Fragment URLs and links between apps
 
