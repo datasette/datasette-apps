@@ -45,6 +45,12 @@ _ID_RE = re.compile(
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
+def _clean_text(value):
+    """Untrusted text as a single line. Manifest text is shown to models
+    in line-based lists, where a newline could forge an extra entry."""
+    return " ".join(value.split())[:MAX_DESCRIPTION_CHARS]
+
+
 def _manifest_source(html):
     for match in _SCRIPT_RE.finditer(html or ""):
         id_match = _ID_RE.search(match.group("attrs"))
@@ -85,7 +91,7 @@ def _normalize_param(name, value, errors, where):
         return param
     description = value.get("description")
     if isinstance(description, str) and description.strip():
-        param["description"] = description.strip()[:MAX_DESCRIPTION_CHARS]
+        param["description"] = _clean_text(description)
     column = value.get("column")
     if column is not None:
         if parse_column(column) is None:
@@ -120,6 +126,12 @@ def normalize_links(value):
         if not isinstance(template, str) or not template.startswith("#"):
             errors.append(f'{where}: "template" must be a string starting with #')
             continue
+        if any(ch == " " or not ch.isprintable() for ch in template):
+            errors.append(
+                f"{where}: template must not contain whitespace or control "
+                "characters"
+            )
+            continue
         if len(template) > MAX_TEMPLATE_CHARS:
             errors.append(f"{where}: template is too long")
             continue
@@ -145,9 +157,7 @@ def normalize_links(value):
             {
                 "template": template,
                 "description": (
-                    description.strip()[:MAX_DESCRIPTION_CHARS]
-                    if isinstance(description, str)
-                    else ""
+                    _clean_text(description) if isinstance(description, str) else ""
                 ),
                 "params": params,
             }
