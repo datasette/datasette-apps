@@ -26,6 +26,7 @@ async def test_app_edit_agent_tools_are_registered():
     tools = _tools_by_name()
     assert set(tools) == {
         "app_list",
+        "app_links",
         "app_create",
         "app_view",
         "app_str_replace",

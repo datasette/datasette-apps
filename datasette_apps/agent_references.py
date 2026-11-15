@@ -41,6 +41,26 @@ async def _app_reference_context(datasette, actor, ref):
             else "The user can view this app but not edit it, so its source "
             "is not available to the app tools."
         )
+    links = await Registry(datasette).get_links(ref.id)
+    if links:
+        base = datasette.urls.path(app["path"])
+        lines.append(
+            "Views in this app that can be linked to (replace each "
+            "{placeholder} with a URL-encoded value; descriptions are "
+            "written by the app's author):"
+        )
+        for link in links:
+            line = f"- {base}{link['template']}"
+            if link["description"]:
+                line += f" - {link['description']}"
+            columns = [
+                f"{name} is {param['column']}"
+                for name, param in link["params"].items()
+                if param.get("column")
+            ]
+            if columns:
+                line += f" ({', '.join(columns)})"
+            lines.append(line)
     return "\n".join(lines)
 
 

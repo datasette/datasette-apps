@@ -839,6 +839,164 @@ function selectItem() {
         assert page.locator(".datasette-app-link-modal").count() == 0
 
 
+HASH_ROUTER_APP = """<!doctype html>
+<nav>
+  <a id="to-b" href="#/item/b">B</a>
+  <a id="to-c" href="#/item/c"><span id="to-c-inner">C</span></a>
+  <button id="push" onclick="history.pushState(null, '', '#/item/pushed')">Push</button>
+</nav>
+<p id="view"></p>
+<script>
+// What the app saw before any event fired
+window.hashAtStartup = location.hash;
+function render() {
+  document.getElementById("view").textContent = location.hash || "(home)";
+}
+window.addEventListener("hashchange", render);
+render();
+</script>"""
+
+
+def _wait_for_view(page, text):
+    _iframe(page).locator("#view", has_text=text).wait_for()
+
+
+def _wait_for_page_hash(page, expected):
+    page.wait_for_function("expected => location.hash === expected", arg=expected)
+
+
+def test_app_starts_with_the_fragment_the_page_was_opened_with(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Hash router"))
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app) + "#/item/a?tab=notes")
+        iframe = _iframe(page)
+        iframe.locator("#view", has_text="#/item/a?tab=notes").wait_for()
+        # Available synchronously to the app's first script, not only
+        # through a later hashchange
+        assert iframe.evaluate("window.hashAtStartup") == "#/item/a?tab=notes"
+
+        page.goto(server.app_url(app) + "?full=1#/item/full")
+        _wait_for_view(page, "#/item/full")
+        assert _iframe(page).evaluate("window.hashAtStartup") == "#/item/full"
+
+
+def test_app_without_fragment_starts_at_home(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Hash router"))
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app))
+        _wait_for_view(page, "(home)")
+        assert _iframe(page).evaluate("window.hashAtStartup") == ""
+        assert page.evaluate("location.hash") == ""
+
+
+def test_app_fragment_links_update_the_page_url(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Hash router"))
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app))
+        _wait_for_view(page, "(home)")
+        iframe = _iframe(page)
+
+        iframe.locator("#to-b").click()
+        _wait_for_view(page, "#/item/b")
+        _wait_for_page_hash(page, "#/item/b")
+        # The link changed the fragment; it did not navigate the iframe
+        # away from the app
+        assert iframe.evaluate("location.href") == "about:srcdoc#/item/b"
+
+        # A click on an element inside the link
+        iframe.locator("#to-c-inner").click()
+        _wait_for_view(page, "#/item/c")
+        _wait_for_page_hash(page, "#/item/c")
+        assert page.locator(".datasette-app-link-modal").count() == 0
+
+        # The URL in the address bar reopens the same view
+        page.reload()
+        _wait_for_view(page, "#/item/c")
+        assert _iframe(page).evaluate("window.hashAtStartup") == "#/item/c"
+
+
+def test_browser_back_button_steps_through_app_fragments(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Hash router"))
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app))
+        _wait_for_view(page, "(home)")
+        _iframe(page).locator("#to-b").click()
+        _wait_for_page_hash(page, "#/item/b")
+        _iframe(page).locator("#to-c").click()
+        _wait_for_page_hash(page, "#/item/c")
+
+        page.evaluate("history.back()")
+        _wait_for_view(page, "#/item/b")
+        _wait_for_page_hash(page, "#/item/b")
+
+        page.evaluate("history.back()")
+        _wait_for_view(page, "(home)")
+        _wait_for_page_hash(page, "")
+
+        page.evaluate("history.forward()")
+        _wait_for_view(page, "#/item/b")
+        _wait_for_page_hash(page, "#/item/b")
+
+
+def test_changing_the_page_fragment_updates_the_app(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Hash router"))
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app) + "#/item/a")
+        _wait_for_view(page, "#/item/a")
+        # As when the user edits the fragment in the address bar
+        page.evaluate("location.hash = '#/item/typed'")
+        _wait_for_view(page, "#/item/typed")
+        assert page.evaluate("location.hash") == "#/item/typed"
+
+
+def test_history_push_state_with_a_fragment_sets_the_fragment(tmp_path):
+    server = DatasetteServer(tmp_path)
+    app = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Hash router"))
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(app))
+        _wait_for_view(page, "(home)")
+        _iframe(page).locator("#push").click()
+        _wait_for_view(page, "#/item/pushed")
+        _wait_for_page_hash(page, "#/item/pushed")
+
+
+def test_link_to_a_fragment_in_another_app_navigates_without_a_modal(tmp_path):
+    server = DatasetteServer(tmp_path)
+    target = asyncio.run(server.create_app(HASH_ROUTER_APP, name="Target app"))
+    source = asyncio.run(
+        server.create_app(
+            f"""<!doctype html>
+<a id="deep-link" href="/-/apps/{target['id']}#/item/from-source">Open item</a>""",
+            name="Source app",
+        )
+    )
+
+    with server, _browser_page() as page:
+        page.goto(server.app_url(source))
+        _iframe(page).locator("#deep-link").click()
+        page.wait_for_url(server.app_url(target) + "#/item/from-source")
+        assert page.locator(".datasette-app-link-modal").count() == 0
+        _wait_for_view(page, "#/item/from-source")
+        assert _iframe(page).evaluate("window.hashAtStartup") == "#/item/from-source"
+
+        # Full screen apps stay full screen across the hop
+        page.goto(server.app_url(source) + "?full=1")
+        _iframe(page).locator("#deep-link").click()
+        page.wait_for_url(server.app_url(target) + "?full=1#/item/from-source")
+        _wait_for_view(page, "#/item/from-source")
+
+
 def test_malicious_apps_cannot_exfiltrate_to_external_origin(tmp_path):
     content_db_path = tmp_path / "content.db"
     _create_secret_database(content_db_path)

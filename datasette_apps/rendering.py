@@ -138,7 +138,9 @@ _DEBUG_BRIDGE_EXTENSIONS = """
 """
 
 
-def iframe_bridge_script(channel_token=None, debug=False):
+def iframe_bridge_script(channel_token=None, debug=False, initial_hash=None):
+    """initial_hash overrides the fragment the app starts with. Left as
+    None the app starts with the fragment of the page that embeds it."""
     if channel_token is None:
         channel_token = "datasette-apps-test-channel"
     script = """<script id="datasette-apps-bridge">
@@ -151,19 +153,91 @@ def iframe_bridge_script(channel_token=None, debug=False):
   var viewportReporterStarted = false;
   var debugMessageHandler = null;
 
+  var MAX_HASH_LENGTH = 2000;
+  var bakedInitialHash = __INITIAL_HASH__;
+
+  // Fragment state. The app is an about:srcdoc document, so its own
+  // location.hash is private to the iframe. The bridge keeps it in step
+  // with the embedding page's URL fragment in both directions, which is
+  // what makes app state bookmarkable and linkable.
+  function normalizeHash(value) {
+    if (typeof value !== "string") {
+      return "";
+    }
+    if (value && value.charAt(0) !== "#") {
+      value = "#" + value;
+    }
+    if (value === "#" || value.length > MAX_HASH_LENGTH) {
+      return "";
+    }
+    return value;
+  }
+
+  function currentHash() {
+    try {
+      return normalizeHash(window.location.hash);
+    } catch (ignore) {
+      return "";
+    }
+  }
+
+  function setHash(value) {
+    value = normalizeHash(value);
+    if (value === currentHash()) {
+      return;
+    }
+    try {
+      // Always the hash setter, never location.replace("#...") or an
+      // <a href="#..."> default action: a srcdoc document's base URL is
+      // the embedding page's URL, so those resolve to that page and
+      // navigate the iframe away from the app.
+      window.location.hash = value;
+    } catch (ignore) {
+    }
+  }
+
+  (function() {
+    // Runs before any app script, so the app can read location.hash at
+    // startup and find the fragment the page was opened with.
+    var initial = bakedInitialHash;
+    if (initial === null) {
+      try {
+        initial = new URL(document.baseURI).hash;
+      } catch (ignore) {
+        initial = "";
+      }
+    }
+    setHash(initial);
+  })();
+
+  window.addEventListener("hashchange", function() {
+    postToParent({type: "datasette-app-hash", hash: currentHash()});
+  });
+
   function noopHistoryMethod() {
   }
 
+  // pushState/replaceState throw in a sandboxed srcdoc document. A
+  // fragment-only URL is the one thing they can usefully mean here.
+  function hashHistoryMethod(state, title, url) {
+    if (typeof url === "string" && url.charAt(0) === "#") {
+      setHash(url);
+    }
+  }
+
   function shimHistoryMethod(name) {
+    var method = (name === "pushState" || name === "replaceState")
+      ? hashHistoryMethod
+      : noopHistoryMethod;
     try {
       Object.defineProperty(window.history, name, {
-        value: noopHistoryMethod,
+        value: method,
         configurable: true,
         writable: true
       });
     } catch (ignore) {
       try {
-        window.history[name] = noopHistoryMethod;
+        window.history[name] = method;
       } catch (ignoreAssignment) {
       }
     }
@@ -171,7 +245,7 @@ def iframe_bridge_script(channel_token=None, debug=False):
     try {
       if (window.History && window.History.prototype) {
         Object.defineProperty(window.History.prototype, name, {
-          value: noopHistoryMethod,
+          value: method,
           configurable: true,
           writable: true
         });
@@ -350,6 +424,31 @@ def iframe_bridge_script(channel_token=None, debug=False):
     });
   }, true);
 
+  // Fragment links. Bubble phase, so an app's own click handlers run
+  // first and can preventDefault() to take over.
+  window.addEventListener("click", function(event) {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    var anchor = closestAnchor(event.target);
+    if (!anchor || anchor.hasAttribute("download")) {
+      return;
+    }
+    var rawHref = (anchor.getAttribute("href") || "").trim();
+    if (rawHref.charAt(0) !== "#") {
+      return;
+    }
+    event.preventDefault();
+    setHash(rawHref);
+  });
+
   window.addEventListener("error", function(event) {
     if (event.target && event.target !== window && event.target !== document) {
       var target = event.target;
@@ -461,6 +560,10 @@ __DEBUG_EXTENSIONS__
     if (debugMessageHandler && debugMessageHandler(message)) {
       return;
     }
+    if (message.type === "datasette-app-set-hash") {
+      setHash(message.hash);
+      return;
+    }
     if (message.type !== "datasette-app-response" || !pending.has(message.id)) {
       return;
     }
@@ -549,9 +652,16 @@ __DEBUG_EXTENSIONS__
   }
 })();
 </script>"""
-    return script.replace(
-        "__DEBUG_EXTENSIONS__", _DEBUG_BRIDGE_EXTENSIONS if debug else ""
-    ).replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
+    return (
+        script.replace(
+            "__DEBUG_EXTENSIONS__", _DEBUG_BRIDGE_EXTENSIONS if debug else ""
+        )
+        .replace("__CHANNEL_TOKEN__", _json_script_string(channel_token))
+        .replace(
+            "__INITIAL_HASH__",
+            "null" if initial_hash is None else _json_script_string(initial_hash),
+        )
+    )
 
 
 def parent_bridge_script(
@@ -582,8 +692,80 @@ def parent_bridge_script(
   var pendingLinkUrl = "";
   var previousFocus = null;
 
+  var MAX_HASH_LENGTH = 2000;
+
   function getIframe() {
     return document.getElementById(__IFRAME_ID__);
+  }
+
+  function normalizeHash(value) {
+    if (typeof value !== "string") {
+      return "";
+    }
+    if (value && value.charAt(0) !== "#") {
+      value = "#" + value;
+    }
+    if (value === "#" || value.length > MAX_HASH_LENGTH) {
+      return "";
+    }
+    return value;
+  }
+
+  // The app changed its fragment: show it in the address bar. Replacing
+  // rather than pushing, because the iframe's own fragment navigation
+  // already added the history entry the back button returns through.
+  function mirrorAppHash(hash) {
+    hash = normalizeHash(hash);
+    if (hash === normalizeHash(window.location.hash)) {
+      return;
+    }
+    try {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        hash || (window.location.pathname + window.location.search)
+      );
+    } catch (ignore) {
+    }
+  }
+
+  function sendHashToApp() {
+    if (bridgePort) {
+      bridgePort.postMessage({
+        type: "datasette-app-set-hash",
+        hash: normalizeHash(window.location.hash)
+      });
+    }
+  }
+
+  // The address bar fragment changed without the app doing it: the user
+  // edited the URL or followed a link to another state of this app.
+  window.addEventListener("hashchange", sendHashToApp);
+
+  // A link to somewhere in this Datasette instance, such as another
+  // app's fragment URL. Returns null for anything on another origin.
+  function internalUrl(value) {
+    try {
+      var url = new URL(value);
+      if (url.origin !== window.location.origin) {
+        return null;
+      }
+      return url;
+    } catch (ignore) {
+      return null;
+    }
+  }
+
+  function navigateInternal(url) {
+    // Stay full screen when hopping from one full screen app to another.
+    if (
+      mirrorViewport &&
+      /\\/-\\/apps\\/[^\\/]+\\/?$/.test(url.pathname) &&
+      !url.searchParams.has("full")
+    ) {
+      url.searchParams.set("full", "1");
+    }
+    window.location.assign(url.href);
   }
 
   function mirroredViewportMeta() {
@@ -898,7 +1080,16 @@ def parent_bridge_script(
   async function handleBridgeMessage(event) {
     var message = event.data || {};
     if (message.type === "datasette-app-open-link") {
-      showLinkModal(message.url || "");
+      var internal = internalUrl(normalizedExternalUrl(message.url || ""));
+      if (internal) {
+        navigateInternal(internal);
+      } else {
+        showLinkModal(message.url || "");
+      }
+      return;
+    }
+    if (message.type === "datasette-app-hash") {
+      mirrorAppHash(message.hash);
       return;
     }
     if (message.type === "datasette-app-error") {
@@ -965,6 +1156,11 @@ def parent_bridge_script(
       bridgePort.start();
     }
     window.removeEventListener("message", acceptBridgePort);
+    // The app normally reads this page's fragment for itself as it
+    // starts. This covers a browser that does not expose it.
+    if (normalizeHash(window.location.hash)) {
+      sendHashToApp();
+    }
   }
 
   window.addEventListener("message", acceptBridgePort);
