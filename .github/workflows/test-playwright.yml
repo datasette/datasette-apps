@@ -39,7 +39,7 @@ jobs:
         path: |
           ~/.cache/ms-playwright/
           ~/Library/Caches/ms-playwright/
-        key: ${{ runner.os }}-browsers-${{ matrix.browser }}-${{ hashFiles('uv.lock') }}
+        key: ${{ runner.os }}-browsers-${{ matrix.browser }}-${{ hashFiles('pyproject.toml') }}
     - name: Install Playwright browser
       run: |
         ${{ matrix.install-command }}
